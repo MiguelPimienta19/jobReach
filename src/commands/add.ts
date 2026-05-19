@@ -44,36 +44,31 @@ export const addCommand = new Command('add')
       process.exit(1);
     }
 
-    // Cover letter
-    const coverSpinner = ora('Writing cover letter...').start();
+    // Cover letter + contact search in parallel
+    const parallelSpinner = ora('Generating cover letter & searching LinkedIn...').start();
     let coverLetter = '';
-    try {
-      coverLetter = await generateCoverLetter(job);
-      coverSpinner.succeed('Cover letter written');
-    } catch (e) {
-      coverSpinner.warn(`Cover letter failed (continuing): ${e}`);
-    }
-
-    // Find contacts via agent loop
-    const agentSpinner = ora('Running contact search agent...').start();
     let contacts: Contact[] = [];
     try {
-      contacts = await findPeopleAtCompany(job.company, job.title, (msg) => { agentSpinner.text = chalk.dim(msg); });
-      agentSpinner.succeed(`Found ${contacts.length} contact${contacts.length !== 1 ? 's' : ''}`);
+      [coverLetter, contacts] = await Promise.all([
+        generateCoverLetter(job).catch(e => { parallelSpinner.text = chalk.dim(`Cover letter error: ${e}`); return ''; }),
+        findPeopleAtCompany(job.company, job.title, msg => { parallelSpinner.text = chalk.dim(msg); }).catch(() => [] as Contact[]),
+      ]);
+      const summary = [coverLetter ? 'Cover letter ready' : null, `${contacts.length} contact${contacts.length !== 1 ? 's' : ''} found`].filter(Boolean).join(' · ');
+      parallelSpinner.succeed(summary);
     } catch (e) {
-      agentSpinner.warn(`Contact search issue (continuing): ${e}`);
+      parallelSpinner.warn(`Parallel step error (continuing): ${e}`);
     }
 
-    // Outreach messages
+    // All outreach messages in parallel
     if (contacts.length > 0) {
       const msgSpinner = ora('Generating outreach messages...').start();
-      for (const contact of contacts) {
+      await Promise.all(contacts.map(async contact => {
         try {
           contact.outreachMessage = await generateOutreachMessage({ ...job, coverLetter, status: 'pending' }, contact);
         } catch {
           contact.outreachMessage = '';
         }
-      }
+      }));
       msgSpinner.succeed('Outreach messages ready');
     }
 
@@ -119,7 +114,7 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
     console.log(chalk.gray("  LinkedIn blocks most automated discovery. You'll need to search manually this time."));
   } else {
     contacts.forEach((contact, i) => {
-      const roleLabel = { recruiter: chalk.magenta('Recruiter'), hiring_manager: chalk.blue('Hiring Manager'), new_grad_hire: chalk.green('New Grad Hire'), other: chalk.gray('Other') }[contact.roleType];
+      const roleLabel = { recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter') }[contact.roleType];
       console.log(`\n  ${chalk.bold(`${i + 1}. ${contact.name}`)}  ·  ${contact.title}  [${roleLabel}]`);
       if (contact.linkedinUrl) {
         console.log(`     ${chalk.cyan.underline(contact.linkedinUrl)}`);

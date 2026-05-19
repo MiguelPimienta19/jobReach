@@ -1,5 +1,5 @@
 export type JobStatus = 'pending' | 'applied' | 'interview' | 'offer' | 'rejected';
-export type RoleType = 'recruiter' | 'hiring_manager' | 'new_grad_hire' | 'other';
+export type RoleType = 'recruiter' | 'university_recruiter';
 
 export interface JobPosting {
   id?: string;

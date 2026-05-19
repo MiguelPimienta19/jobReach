@@ -2,17 +2,20 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Contact } from '../types.js';
 
 export async function findPeopleAtCompany(company: string, jobTitle: string, onProgress?: (msg: string) => void): Promise<Contact[]> {
-  const prompt = `Search LinkedIn to find people at "${company}" who are relevant to someone applying for a "${jobTitle}" role.
+  const prompt = `Search LinkedIn to find up to 3 people at "${company}" who can directly help someone get hired for a "${jobTitle}" role.
 
-Use the LinkedIn search tools to find:
-1. **Recruiters or University Recruiters** at ${company} — search for people with titles like "Recruiter", "Talent Acquisition", "University Recruiting"
-2. **Hiring Managers or Engineering Managers** for teams related to "${jobTitle}" at ${company}
-3. **Recent new grad hires** — people who joined ${company} in the last 1-2 years with junior/new grad titles
+Only look for these two types — no one else:
+1. **Recruiters / Talent Acquisition** — people with titles like "Recruiter", "Talent Acquisition", "Staffing"
+2. **University Recruiters / Early Talent** — people with titles like "University Recruiter", "Campus Recruiter", "Early Career", "Early Talent", "University Relations", "New Grad Recruiting"
 
-For each person found, get their: full name, current job title, and LinkedIn profile URL.
+University recruiters are the highest priority — they exist specifically to hire new grads.
 
-When done, output ONLY a JSON array — no preamble, no explanation:
-[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "recruiter|hiring_manager|new_grad_hire" }]`;
+Use get_company_employees for "${company}" first. If that doesn't give you enough, use search_people with targeted queries.
+
+Return AT MOST 3 people. Quality over quantity — only include people whose title clearly matches the above.
+
+Output ONLY a JSON array, no preamble:
+[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "recruiter|university_recruiter" }]`;
 
   let contacts: Contact[] = [];
 
@@ -28,13 +31,13 @@ When done, output ONLY a JSON array — no preamble, no explanation:
       },
       allowDangerouslySkipPermissions: true,
       permissionMode: 'bypassPermissions',
-      maxTurns: 20,
+      maxTurns: 10,
       settingSources: [],
     },
   })) {
     if (message.type === 'system' && message.subtype === 'init') {
       const linkedinStatus = message.mcp_servers.find(s => s.name === 'linkedin');
-      onProgress?.(`LinkedIn MCP: ${linkedinStatus?.status ?? 'connecting...'}`);
+      onProgress?.(`LinkedIn MCP: ${linkedinStatus?.status ?? 'connecting'}`);
     } else if (message.type === 'assistant') {
       const textBlocks = message.message.content.filter((b: { type: string }) => b.type === 'text');
       if (textBlocks.length > 0) {
@@ -47,7 +50,10 @@ When done, output ONLY a JSON array — no preamble, no explanation:
         if (jsonMatch) {
           try {
             const parsed = JSON.parse(jsonMatch[0]) as Array<{ name: string; title: string; linkedinUrl?: string | null; roleType: string }>;
-            contacts = parsed.filter(p => p.name && p.title).map(p => ({ name: p.name, title: p.title, linkedinUrl: p.linkedinUrl ?? undefined, company, roleType: (p.roleType as Contact['roleType']) ?? 'other' }));
+            contacts = parsed
+              .filter(p => p.name && p.title)
+              .slice(0, 3)
+              .map(p => ({ name: p.name, title: p.title, linkedinUrl: p.linkedinUrl ?? undefined, company, roleType: (p.roleType as Contact['roleType']) ?? 'recruiter' }));
           } catch { /* malformed JSON */ }
         }
       } else {

@@ -1,15 +1,16 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import type { JobPosting, Contact } from '../types.js';
 
-const MY_BACKGROUND = `You are helping Miguel Pimienta with his job search. Write in first person as Miguel.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const contextPath = join(__dirname, '../../context/me.md');
+const contextFile = existsSync(contextPath) ? readFileSync(contextPath, 'utf-8') : '';
 
-Miguel's background:
-- Senior CS + Data Science student at University of Oregon, graduating June 2026
-- Steward: 1st place CMU NexHacks — Chrome extension + Electron app for privacy-preserving AI (processes data locally, never sends to external servers)
-- AgDash: Production React/TypeScript dashboard for Papé Group (major Pacific Northwest equipment dealer) — Python pipeline ingesting USDA agricultural data driving real business decisions
-- TechPrep: AI-powered voice interview coach — MLH Best Use of Snowflake award
-- Stack: TypeScript, React, Node.js, Supabase, Python. Strong full-stack + data engineering lean
-- Every project listed is either in production or a competition winner
+const MY_BACKGROUND = `You are helping with a job search. Write in first person as the applicant.
+
+${contextFile || `The applicant is Miguel Pimienta, a senior CS + Data Science student at University of Oregon graduating June 2026. Projects: Steward (1st place CMU NexHacks, privacy AI), AgDash (production dashboard for Papé Group), TechPrep (AI interview coach, MLH award). Stack: TypeScript, React, Node.js, Supabase, Python.`}
 
 Write in a genuine, confident voice. No filler phrases. No corporate-speak. Sound like a sharp student, not a resume bot.`;
 
@@ -54,6 +55,8 @@ ${rawText.slice(0, 8000)}`);
 export async function generateCoverLetter(job: JobPosting): Promise<string> {
   return generate(`Write a cover letter for Miguel applying to ${job.title} at ${job.company}.
 
+Output ONLY the cover letter text — no intro, no "Here's the cover letter:", no word count, no markdown headers, no "---" separators. Just the letter itself, ready to copy-paste.
+
 Rules:
 - Under 350 words
 - Lead with something punchy and specific — not "I am writing to express my interest"
@@ -68,14 +71,14 @@ Requirements: ${job.requirements ?? 'Not listed'}`);
 }
 
 const ROLE_CONTEXT: Record<Contact['roleType'], string> = {
-  recruiter: "This is a recruiter or HR person. Keep it short — one tight paragraph. Mention the specific role Miguel applied to. Make it easy for them to act.",
-  hiring_manager: "This is a hiring manager or engineering lead. Show genuine curiosity about the technical work their team does. Reference one specific project from Miguel's background that's most relevant. Ask a real question.",
-  new_grad_hire: "This is a recent new grad hire at the company (joined 1-2 years ago). Make it peer-to-peer and casual. Ask about their experience as a new grad there — culture, what surprised them. Don't directly ask for a referral.",
-  other: "Keep it professional and brief. One paragraph.",
+  recruiter: "This is a recruiter or talent acquisition person. Keep it to one short paragraph. Name the specific role Miguel applied to. Make it effortless for them to act — they get a lot of these.",
+  university_recruiter: "This is a university recruiter or early talent person. They specifically hire new grads — this is their whole job. Lead with Miguel graduating June 2026, mention the strongest project in one sentence, and make it very easy for them to respond. These people want to find good new grads, so be direct about that.",
 };
 
 export async function generateOutreachMessage(job: JobPosting, contact: Contact): Promise<string> {
   return generate(`Write a LinkedIn outreach message from Miguel to ${contact.name} (${contact.title} at ${contact.company}).
+
+Output ONLY the message text — no intro, no "Here's a message:", no word count, no "---". Just the message, ready to paste into LinkedIn.
 
 Context: ${ROLE_CONTEXT[contact.roleType]}
 Job applied for: ${job.title} at ${job.company}
@@ -90,6 +93,8 @@ Rules:
 
 export async function answerApplicationQuestion(job: JobPosting, question: string): Promise<string> {
   return generate(`Answer this application question for Miguel applying to ${job.title} at ${job.company}.
+
+Output ONLY the answer — no intro, no "Here's my answer:", no meta-commentary. Just the response text, ready to paste.
 
 Question: "${question}"
 
