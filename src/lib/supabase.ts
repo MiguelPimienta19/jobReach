@@ -31,7 +31,7 @@ export async function saveJob(job: Omit<JobPosting, 'id'>): Promise<string> {
 }
 
 export async function saveContact(contact: Contact): Promise<string> {
-  const { data, error } = await getClient().from('contacts').insert({
+  const { data, error } = await getClient().from('contacts').upsert({
     job_id: contact.jobId,
     name: contact.name,
     title: contact.title ?? null,
@@ -39,7 +39,7 @@ export async function saveContact(contact: Contact): Promise<string> {
     company: contact.company,
     role_type: contact.roleType,
     outreach_message: contact.outreachMessage ?? null,
-  }).select('id').single();
+  }, { onConflict: 'job_id,name' }).select('id').single();
   if (error) throw new Error(`Supabase error saving contact: ${error.message}`);
   return data.id as string;
 }

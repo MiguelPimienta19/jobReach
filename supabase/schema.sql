@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS contacts (
   title            TEXT,
   linkedin_url     TEXT,
   company          TEXT        NOT NULL,
-  role_type        TEXT        NOT NULL,  -- recruiter | hiring_manager | new_grad_hire | other
+  role_type        TEXT        NOT NULL,  -- recruiter | university_recruiter
+  UNIQUE (job_id, name)
   outreach_message TEXT,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

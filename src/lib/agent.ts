@@ -1,5 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { Contact } from '../types.js';
+import type { Contact, RoleType } from '../types.js';
+
+const VALID_ROLE_TYPES = new Set<RoleType>(['recruiter', 'university_recruiter']);
 
 export async function findPeopleAtCompany(company: string, jobTitle: string, onProgress?: (msg: string) => void): Promise<Contact[]> {
   const prompt = `Search LinkedIn to find up to 3 people at "${company}" who can directly help someone get hired for a "${jobTitle}" role.
@@ -15,7 +17,7 @@ Use get_company_employees for "${company}" first. If that doesn't give you enoug
 Return AT MOST 3 people. Quality over quantity — only include people whose title clearly matches the above.
 
 Output ONLY a JSON array, no preamble:
-[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "recruiter|university_recruiter" }]`;
+[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "recruiter" or "university_recruiter" }]`;
 
   let contacts: Contact[] = [];
 
@@ -53,7 +55,7 @@ Output ONLY a JSON array, no preamble:
             contacts = parsed
               .filter(p => p.name && p.title)
               .slice(0, 3)
-              .map(p => ({ name: p.name, title: p.title, linkedinUrl: p.linkedinUrl ?? undefined, company, roleType: (p.roleType as Contact['roleType']) ?? 'recruiter' }));
+              .map(p => ({ name: p.name, title: p.title, linkedinUrl: p.linkedinUrl ?? undefined, company, roleType: VALID_ROLE_TYPES.has(p.roleType as RoleType) ? (p.roleType as RoleType) : 'recruiter' }));
           } catch { /* malformed JSON */ }
         }
       } else {

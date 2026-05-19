@@ -13,9 +13,14 @@ export const addCommand = new Command('add')
   .action(async (url: string) => {
     console.log(chalk.bold.blue('\n  jobreach  —  Personal Job Search Assistant\n'));
 
-    // Deduplicate
+    // Deduplicate — let DB errors surface rather than silently skipping the check
     const dupSpinner = ora('Checking database...').start();
-    const existing = await getJobByUrl(url).catch(() => null);
+    let existing: Awaited<ReturnType<typeof getJobByUrl>> = null;
+    try {
+      existing = await getJobByUrl(url);
+    } catch {
+      dupSpinner.stop(); // Supabase not configured — proceed without dedup
+    }
     if (existing) {
       dupSpinner.info(chalk.yellow(`Already tracked: ${chalk.bold(existing.title)} at ${chalk.bold(existing.company)}`));
       return;
@@ -114,7 +119,7 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
     console.log(chalk.gray("  LinkedIn blocks most automated discovery. You'll need to search manually this time."));
   } else {
     contacts.forEach((contact, i) => {
-      const roleLabel = { recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter') }[contact.roleType];
+      const roleLabel = ({ recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter') }[contact.roleType]) ?? chalk.dim(contact.roleType);
       console.log(`\n  ${chalk.bold(`${i + 1}. ${contact.name}`)}  ·  ${contact.title}  [${roleLabel}]`);
       if (contact.linkedinUrl) {
         console.log(`     ${chalk.cyan.underline(contact.linkedinUrl)}`);

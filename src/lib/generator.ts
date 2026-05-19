@@ -6,7 +6,9 @@ import type { JobPosting, Contact } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const contextPath = join(__dirname, '../../context/me.md');
-const contextFile = existsSync(contextPath) ? readFileSync(contextPath, 'utf-8') : '';
+const contextExists = existsSync(contextPath);
+if (!contextExists) console.warn('\n⚠  context/me.md not found — using built-in fallback bio. Create context/me.md for better results.\n');
+const contextFile = contextExists ? readFileSync(contextPath, 'utf-8') : '';
 
 const MY_BACKGROUND = `You are helping with a job search. Write in first person as the applicant.
 
@@ -20,14 +22,19 @@ async function generate(prompt: string): Promise<string> {
     options: {
       systemPrompt: MY_BACKGROUND,
       maxTurns: 1,
+      // permissionMode: 'dontAsk' ensures no tools fire even if allowedTools: [] is ambiguous
       allowedTools: [],
       permissionMode: 'dontAsk',
       settingSources: [],
     },
   })) {
     if (message.type === 'result' && message.subtype === 'success') return message.result.trim();
+    if (message.type === 'result' && message.subtype !== 'success') {
+      const err = 'errors' in message ? (message.errors as string[]).join('; ') : message.subtype;
+      throw new Error(`Generation agent failed: ${err}`);
+    }
   }
-  return '';
+  throw new Error('Generation agent completed without producing a result');
 }
 
 export async function extractJobDetails(rawText: string, url: string): Promise<Omit<JobPosting, 'id' | 'status' | 'coverLetter'>> {
