@@ -4,3 +4,4 @@ dist/
 *.js.map
 context/
 NEXT_STEPS.md
+.claude
