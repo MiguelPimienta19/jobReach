@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { JobPosting, Contact } from '../types.js';
+import { recordTokens } from './tokenLog.js';
 
 interface ResultMessage {
   type: 'result';
@@ -44,7 +45,22 @@ Write in a genuine, confident voice. No filler phrases. No corporate-speak. Soun
 // Internal Generator
 // ============================================================================
 
-async function generate(prompt: string): Promise<string> {
+function usageFrom(message: unknown): { input: number; output: number; cacheRead: number; cacheWrite: number } | null {
+  if (!message || typeof message !== 'object') { return null; }
+  const m = message as Record<string, unknown>;
+  const inner = ((m.message as Record<string, unknown> | undefined)?.usage ?? m.usage) as Record<string, number> | undefined;
+  if (!inner || typeof inner !== 'object') { return null; }
+  return {
+    input: (inner.input_tokens as number) ?? 0,
+    output: (inner.output_tokens as number) ?? 0,
+    cacheRead: (inner.cache_read_input_tokens as number) ?? 0,
+    cacheWrite: (inner.cache_creation_input_tokens as number) ?? 0,
+  };
+}
+
+async function generate(prompt: string, stepName = 'generate'): Promise<string> {
+  let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheWrite = 0;
+
   for await (const message of query({
     prompt,
     options: {
@@ -56,7 +72,16 @@ async function generate(prompt: string): Promise<string> {
       settingSources: [],
     },
   })) {
-    if (message.type === 'result') {
+    if (message.type === 'assistant') {
+      const usage = usageFrom(message);
+      if (usage) {
+        inputTokens += usage.input;
+        outputTokens += usage.output;
+        cacheRead += usage.cacheRead;
+        cacheWrite += usage.cacheWrite;
+      }
+    } else if (message.type === 'result') {
+      recordTokens(stepName, inputTokens, outputTokens, cacheRead, cacheWrite);
       const r = message as ResultMessage;
 
       if (r.subtype === 'success') {
@@ -88,7 +113,7 @@ export async function extractJobDetails(rawText: string, url: string): Promise<O
 Job URL: ${url}
 
 Text:
-${rawText.slice(0, 8000)}`);
+${rawText.slice(0, 8000)}`, 'extract');
 
   const match = result.match(/\{[\s\S]*\}/);
 
@@ -138,7 +163,7 @@ Rules:
 Role: ${job.title} at ${job.company}
 ${job.location ? `Location: ${job.location}` : ''}
 Description: ${job.description}
-Requirements: ${job.requirements ?? 'Not listed'}`);
+Requirements: ${job.requirements ?? 'Not listed'}`, 'coverLetter');
 }
 
 // ============================================================================
@@ -163,7 +188,7 @@ Rules:
 - No "I hope this message finds you well"
 - No "I came across your profile"
 - Natural and direct
-- Don't start with "Hi" as the literal first word — vary the opening`);
+- Don't start with "Hi" as the literal first word — vary the opening`, 'outreach');
 }
 
 export async function generateConnectionNote(job: JobPosting, contact: Contact): Promise<string> {
@@ -179,7 +204,7 @@ Rules:
 - One short paragraph, no line breaks
 - Mention the specific role
 - Natural and direct — not a cover letter
-- Don't start with "Hi" as the literal first word`);
+- Don't start with "Hi" as the literal first word`, 'connectionNote');
 
   return note.slice(0, 280);
 }
@@ -204,5 +229,5 @@ Rules:
 - Be specific — reference real projects or experiences from his background where relevant
 - Genuine and reflective, not corporate
 - 150–250 words unless the question clearly calls for something shorter
-- Do NOT start with "I" — vary the opening`);
+- Do NOT start with "I" — vary the opening`, 'qa');
 }

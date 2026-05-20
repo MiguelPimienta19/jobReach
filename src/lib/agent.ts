@@ -1,5 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Contact, RoleType } from '../types.js';
+import { recordTokens } from './tokenLog.js';
 
 interface AgentContentBlock {
   type: string;
@@ -28,10 +29,32 @@ interface ResultMessage {
 const VALID_ROLE_TYPES = new Set<RoleType>(['recruiter', 'university_recruiter']);
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+function usageFrom(message: unknown): { input: number; output: number; cacheRead: number; cacheWrite: number } | null {
+  if (!message || typeof message !== 'object') { return null; }
+  const m = message as Record<string, unknown>;
+  const inner = ((m.message as Record<string, unknown> | undefined)?.usage ?? m.usage) as Record<string, number> | undefined;
+  if (!inner || typeof inner !== 'object') { return null; }
+  return {
+    input: (inner.input_tokens as number) ?? 0,
+    output: (inner.output_tokens as number) ?? 0,
+    cacheRead: (inner.cache_read_input_tokens as number) ?? 0,
+    cacheWrite: (inner.cache_creation_input_tokens as number) ?? 0,
+  };
+}
+
+// ============================================================================
 // LinkedIn Contact Discovery
 // ============================================================================
 
 export async function findPeopleAtCompany(company: string, jobTitle: string, onProgress?: (msg: string) => void): Promise<Contact[]> {
+  // Small random delay before hitting LinkedIn — avoid back-to-back velocity after Playwright scrape
+  const delay = 3000 + Math.floor(Math.random() * 4000);
+  onProgress?.(`Pausing ${Math.round(delay / 1000)}s before LinkedIn search...`);
+  await new Promise(r => setTimeout(r, delay));
+
   const prompt = `Search LinkedIn to find up to 3 people at "${company}" who can directly help someone get hired for a "${jobTitle}" role.
 
 Only look for these two types — no one else:
