@@ -8,6 +8,10 @@ import { findPeopleAtCompany } from '../lib/agent.js';
 import { saveJob, saveContact, saveMessage, markMessageSent, getJobByUrl } from '../lib/supabase.js';
 import type { Contact, JobPosting } from '../types.js';
 
+// ============================================================================
+// Action Handler
+// ============================================================================
+
 export const addCommand = new Command('add')
   .description('Add a job posting and generate outreach materials')
   .argument('<url>', 'URL of the job posting')
@@ -105,18 +109,30 @@ export const addCommand = new Command('add')
         // Pause between LinkedIn scraping (just happened) and the first connection send,
         // so the back-to-back scrape→write doesn't look like a velocity spike to LinkedIn.
         const gapSpinner = ora(chalk.dim('Pausing 15s before sending requests...')).start();
-        try { await new Promise(r => setTimeout(r, 15000)); } finally { gapSpinner.stop(); }
+        try {
+          await new Promise(r => setTimeout(r, 15000));
+        } finally {
+          gapSpinner.stop();
+        }
 
         const jobPosting = { ...job, coverLetter, status: 'pending' as const };
         const results = await sendConnections(jobPosting, withUrls);
         for (const { contact, success } of results) {
-          if (!success) continue;
+          if (!success) {
+            continue;
+          }
           const messageId = messageIdByContact.get(contact);
-          if (messageId) await markMessageSent(messageId).catch(() => {});
+          if (messageId) {
+            await markMessageSent(messageId).catch(() => {});
+          }
         }
       }
     }
   });
+
+// ============================================================================
+// Render Helpers
+// ============================================================================
 
 function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, contacts: Contact[], coverLetter: string, saved: boolean) {
   const W = 62;
@@ -125,7 +141,9 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
 
   console.log('\n' + div);
   console.log(chalk.bold.green(`  ${job.title} — ${job.company}`));
-  if (job.location) console.log(chalk.gray(`  ${job.location}${job.salaryRange ? '  ·  ' + job.salaryRange : ''}`));
+  if (job.location) {
+    console.log(chalk.gray(`  ${job.location}${job.salaryRange ? '  ·  ' + job.salaryRange : ''}`));
+  }
   console.log(div);
 
   // Cover letter
@@ -161,11 +179,19 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
           const wrapped: string[] = [];
           let current = '';
           for (const word of words) {
-            if ((current + ' ' + word).trim().length > innerW - 2) { wrapped.push(current.trim()); current = word; }
-            else current = (current + ' ' + word).trim();
+            if ((current + ' ' + word).trim().length > innerW - 2) {
+              wrapped.push(current.trim());
+              current = word;
+            } else {
+              current = (current + ' ' + word).trim();
+            }
           }
-          if (current) wrapped.push(current);
-          for (const wl of wrapped) console.log('     ' + chalk.dim('│') + ' ' + chalk.white(wl.padEnd(innerW - 2)) + ' ' + chalk.dim('│'));
+          if (current) {
+            wrapped.push(current);
+          }
+          for (const wl of wrapped) {
+            console.log('     ' + chalk.dim('│') + ' ' + chalk.white(wl.padEnd(innerW - 2)) + ' ' + chalk.dim('│'));
+          }
         }
         console.log('     ' + chalk.dim('└' + '─'.repeat(innerW) + '┘'));
       }

@@ -4,10 +4,34 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { JobPosting, Contact } from '../types.js';
 
+interface ResultMessage {
+  type: 'result';
+  subtype: string;
+  result?: string;
+  errors?: string[];
+}
+
+interface ParsedJobDetails {
+  company?: string;
+  title?: string;
+  description?: string;
+  location?: string;
+  salaryRange?: string;
+  requirements?: string;
+}
+
+// ============================================================================
+// Module Setup
+// ============================================================================
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const contextPath = join(__dirname, '../../context/me.md');
 const contextExists = existsSync(contextPath);
-if (!contextExists) console.warn('\n⚠  context/me.md not found — using built-in fallback bio. Create context/me.md for better results.\n');
+
+if (!contextExists) {
+  console.warn('\n⚠  context/me.md not found — using built-in fallback bio. Create context/me.md for better results.\n');
+}
+
 const contextFile = contextExists ? readFileSync(contextPath, 'utf-8') : '';
 
 const MY_BACKGROUND = `You are helping with a job search. Write in first person as the applicant.
@@ -15,6 +39,10 @@ const MY_BACKGROUND = `You are helping with a job search. Write in first person 
 ${contextFile || `The applicant is Miguel Pimienta, a senior CS + Data Science student at University of Oregon graduating June 2026. Projects: Steward (1st place CMU NexHacks, privacy AI), AgDash (production dashboard for Papé Group), TechPrep (AI interview coach, MLH award). Stack: TypeScript, React, Node.js, Supabase, Python.`}
 
 Write in a genuine, confident voice. No filler phrases. No corporate-speak. Sound like a sharp student, not a resume bot.`;
+
+// ============================================================================
+// Internal Generator
+// ============================================================================
 
 async function generate(prompt: string): Promise<string> {
   for await (const message of query({
@@ -29,13 +57,22 @@ async function generate(prompt: string): Promise<string> {
     },
   })) {
     if (message.type === 'result') {
-      const r = message as { type: 'result'; subtype: string; result?: string; errors?: string[] };
-      if (r.subtype === 'success') return (r.result ?? '').trim();
+      const r = message as ResultMessage;
+
+      if (r.subtype === 'success') {
+        return (r.result ?? '').trim();
+      }
+
       throw new Error(`Generation agent failed: ${r.errors?.join('; ') ?? r.subtype}`);
     }
   }
+
   throw new Error('Generation agent completed without producing a result');
 }
+
+// ============================================================================
+// Job Extraction
+// ============================================================================
 
 export async function extractJobDetails(rawText: string, url: string): Promise<Omit<JobPosting, 'id' | 'status' | 'coverLetter'>> {
   const result = await generate(`Extract structured job posting info from this text. Return ONLY a JSON object:
@@ -54,16 +91,37 @@ Text:
 ${rawText.slice(0, 8000)}`);
 
   const match = result.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('Could not parse job details from page content');
-  let parsed: { company?: string; title?: string; description?: string; location?: string; salaryRange?: string; requirements?: string };
+
+  if (!match) {
+    throw new Error('Could not parse job details from page content');
+  }
+
+  let parsed: ParsedJobDetails;
+
   try {
     parsed = JSON.parse(match[0]);
   } catch {
     throw new Error('Model returned malformed JSON for job details — try re-running');
   }
-  if (!parsed.company || !parsed.title || !parsed.description) throw new Error('Model returned JSON missing required job fields (company, title, description)');
-  return { url, company: parsed.company, title: parsed.title, description: parsed.description, location: parsed.location ?? undefined, salaryRange: parsed.salaryRange ?? undefined, requirements: parsed.requirements ?? undefined };
+
+  if (!parsed.company || !parsed.title || !parsed.description) {
+    throw new Error('Model returned JSON missing required job fields (company, title, description)');
+  }
+
+  return {
+    url,
+    company: parsed.company,
+    title: parsed.title,
+    description: parsed.description,
+    location: parsed.location ?? undefined,
+    salaryRange: parsed.salaryRange ?? undefined,
+    requirements: parsed.requirements ?? undefined,
+  };
 }
+
+// ============================================================================
+// Cover Letter
+// ============================================================================
 
 export async function generateCoverLetter(job: JobPosting): Promise<string> {
   return generate(`Write a cover letter for Miguel applying to ${job.title} at ${job.company}.
@@ -82,6 +140,10 @@ ${job.location ? `Location: ${job.location}` : ''}
 Description: ${job.description}
 Requirements: ${job.requirements ?? 'Not listed'}`);
 }
+
+// ============================================================================
+// Outreach Generation
+// ============================================================================
 
 const ROLE_CONTEXT: Record<Contact['roleType'], string> = {
   recruiter: "This is a recruiter or talent acquisition person. Keep it to one short paragraph. Name the specific role Miguel applied to. Make it effortless for them to act — they get a lot of these.",
@@ -118,8 +180,13 @@ Rules:
 - Mention the specific role
 - Natural and direct — not a cover letter
 - Don't start with "Hi" as the literal first word`);
+
   return note.slice(0, 280);
 }
+
+// ============================================================================
+// Q&A
+// ============================================================================
 
 export async function answerApplicationQuestion(job: JobPosting, question: string): Promise<string> {
   return generate(`Answer this application question for Miguel applying to ${job.title} at ${job.company}.

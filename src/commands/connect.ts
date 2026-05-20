@@ -7,6 +7,12 @@ import { generateConnectionNote } from '../lib/generator.js';
 import { sendConnections, jitterBetweenSends } from '../lib/linkedin.js';
 import type { JobPosting, Contact } from '../types.js';
 
+type ConnectionRoleType = 'recruiter' | 'university_recruiter';
+
+// ============================================================================
+// Command Definition
+// ============================================================================
+
 export const connectCommand = new Command('connect')
   .description('Send LinkedIn connection requests for a tracked job')
   .option('--yes', 'Skip confirmations and send all automatically')
@@ -38,23 +44,57 @@ export const connectCommand = new Command('connect')
     if (opts.regen) {
       const regenSpinner = ora('Regenerating connection notes...').start();
       await Promise.all(withUrls.map(async c => {
-        const jobPosting: JobPosting = { id: job.id, url: job.url, company: job.company, title: job.title, description: '', status: 'pending' };
-        const contactObj: Contact = { name: c.name, title: c.title, linkedinUrl: c.linkedinUrl, company: job.company, roleType: c.roleType as 'recruiter' | 'university_recruiter' };
+        const jobPosting: JobPosting = {
+          id: job.id,
+          url: job.url,
+          company: job.company,
+          title: job.title,
+          description: '',
+          status: 'pending',
+        };
+        const contactObj: Contact = {
+          name: c.name,
+          title: c.title,
+          linkedinUrl: c.linkedinUrl,
+          company: job.company,
+          roleType: c.roleType as ConnectionRoleType,
+        };
         const note = await generateConnectionNote(jobPosting, contactObj).catch(() => '');
-        if (note) { c.connectionNote = note; await updateConnectionNote(c.contactId, note).catch(() => {}); }
+        if (note) {
+          c.connectionNote = note;
+          await updateConnectionNote(c.contactId, note).catch(() => {});
+        }
       }));
       regenSpinner.succeed('Notes regenerated');
     }
 
     if (opts.yes) {
-      const jobPosting: JobPosting = { id: job.id, url: job.url, company: job.company, title: job.title, description: '', status: 'pending' };
-      const contactObjs: Contact[] = withUrls.map(c => ({ name: c.name, title: c.title, linkedinUrl: c.linkedinUrl, company: job.company, roleType: c.roleType as 'recruiter' | 'university_recruiter', connectionNote: c.connectionNote }));
+      const jobPosting: JobPosting = {
+        id: job.id,
+        url: job.url,
+        company: job.company,
+        title: job.title,
+        description: '',
+        status: 'pending',
+      };
+      const contactObjs: Contact[] = withUrls.map(c => ({
+        name: c.name,
+        title: c.title,
+        linkedinUrl: c.linkedinUrl,
+        company: job.company,
+        roleType: c.roleType as ConnectionRoleType,
+        connectionNote: c.connectionNote,
+      }));
       const objToOrig = new Map(contactObjs.map((co, i) => [co, withUrls[i]]));
       const results = await sendConnections(jobPosting, contactObjs);
       for (const { contact, success } of results) {
-        if (!success) continue;
+        if (!success) {
+          continue;
+        }
         const orig = objToOrig.get(contact);
-        if (orig?.messageId) await markMessageSent(orig.messageId).catch(() => {});
+        if (orig?.messageId) {
+          await markMessageSent(orig.messageId).catch(() => {});
+        }
       }
       return;
     }
@@ -63,28 +103,52 @@ export const connectCommand = new Command('connect')
 
     let sentAny = false;
     for (const contact of withUrls) {
-      const jobPosting: JobPosting = { id: job.id, url: job.url, company: job.company, title: job.title, description: '', status: 'pending' };
-      const contactObj: Contact = { name: contact.name, title: contact.title, linkedinUrl: contact.linkedinUrl, company: job.company, roleType: contact.roleType as 'recruiter' | 'university_recruiter', connectionNote: contact.connectionNote };
+      const jobPosting: JobPosting = {
+        id: job.id,
+        url: job.url,
+        company: job.company,
+        title: job.title,
+        description: '',
+        status: 'pending',
+      };
+      const contactObj: Contact = {
+        name: contact.name,
+        title: contact.title,
+        linkedinUrl: contact.linkedinUrl,
+        company: job.company,
+        roleType: contact.roleType as ConnectionRoleType,
+        connectionNote: contact.connectionNote,
+      };
 
       console.log(chalk.bold(`  ${contact.name}`) + chalk.dim(`  ·  ${contact.title}`));
       console.log(chalk.dim(`  ${contact.linkedinUrl}`));
 
       const note = contact.connectionNote ?? '';
-      if (!note) { console.log(chalk.yellow('  No connection note saved — run with --regen to generate one.\n')); continue; }
+      if (!note) {
+        console.log(chalk.yellow('  No connection note saved — run with --regen to generate one.\n'));
+        continue;
+      }
 
       console.log(chalk.dim(`\n  Note (${note.length}/280 chars):`));
       console.log(`  ${chalk.white(note)}\n`);
 
       const proceed = await confirm({ message: `Send to ${contact.name}?`, default: true });
-      if (!proceed) { console.log(chalk.dim('  Skipped.\n')); continue; }
+      if (!proceed) {
+        console.log(chalk.dim('  Skipped.\n'));
+        continue;
+      }
 
       // Jitter between successful sends — sendConnections's internal jitter doesn't fire
       // here because we call it one-at-a-time per confirmation
-      if (sentAny) await jitterBetweenSends();
+      if (sentAny) {
+        await jitterBetweenSends();
+      }
       const [result] = await sendConnections(jobPosting, [contactObj]);
       if (result?.success) {
         sentAny = true;
-        if (contact.messageId) await markMessageSent(contact.messageId).catch(() => {});
+        if (contact.messageId) {
+          await markMessageSent(contact.messageId).catch(() => {});
+        }
       }
     }
   });

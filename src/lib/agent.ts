@@ -1,7 +1,35 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Contact, RoleType } from '../types.js';
 
+interface AgentContentBlock {
+  type: string;
+}
+
+interface AgentTextBlock {
+  type: 'text';
+  text: string;
+}
+
+interface RawContactResult {
+  name: string;
+  title: string;
+  linkedinUrl?: string | null;
+  roleType: string;
+}
+
+interface ResultMessage {
+  subtype: string;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
 const VALID_ROLE_TYPES = new Set<RoleType>(['recruiter', 'university_recruiter']);
+
+// ============================================================================
+// LinkedIn Contact Discovery
+// ============================================================================
 
 export async function findPeopleAtCompany(company: string, jobTitle: string, onProgress?: (msg: string) => void): Promise<Contact[]> {
   const prompt = `Search LinkedIn to find up to 3 people at "${company}" who can directly help someone get hired for a "${jobTitle}" role.
@@ -40,26 +68,40 @@ Output ONLY a JSON array, no preamble:
     if (message.type === 'system' && message.subtype === 'init') {
       const linkedinStatus = message.mcp_servers.find(s => s.name === 'linkedin');
       onProgress?.(`LinkedIn MCP: ${linkedinStatus?.status ?? 'connecting'}`);
+
     } else if (message.type === 'assistant') {
-      const textBlocks = message.message.content.filter((b: { type: string }) => b.type === 'text');
+      const textBlocks = message.message.content.filter((b: AgentContentBlock) => b.type === 'text');
+
       if (textBlocks.length > 0) {
-        const preview = (textBlocks[0] as { type: 'text'; text: string }).text.slice(0, 80).replace(/\n/g, ' ');
-        if (preview.trim()) onProgress?.(preview);
+        const preview = (textBlocks[0] as AgentTextBlock).text.slice(0, 80).replace(/\n/g, ' ');
+
+        if (preview.trim()) {
+          onProgress?.(preview);
+        }
       }
+
     } else if (message.type === 'result') {
       if (message.subtype === 'success') {
         const jsonMatch = message.result.match(/\[[\s\S]*\]/);
+
         if (jsonMatch) {
           try {
-            const parsed = JSON.parse(jsonMatch[0]) as Array<{ name: string; title: string; linkedinUrl?: string | null; roleType: string }>;
+            const parsed = JSON.parse(jsonMatch[0]) as RawContactResult[];
+
             contacts = parsed
               .filter(p => p.name && p.title)
               .slice(0, 3)
-              .map(p => ({ name: p.name, title: p.title, linkedinUrl: p.linkedinUrl ?? undefined, company, roleType: VALID_ROLE_TYPES.has(p.roleType as RoleType) ? (p.roleType as RoleType) : 'recruiter' }));
+              .map(p => ({
+                name: p.name,
+                title: p.title,
+                linkedinUrl: p.linkedinUrl ?? undefined,
+                company,
+                roleType: VALID_ROLE_TYPES.has(p.roleType as RoleType) ? (p.roleType as RoleType) : 'recruiter',
+              }));
           } catch { /* malformed JSON */ }
         }
       } else {
-        const errMsg = 'errors' in message ? (message.errors as string[]).join('; ') : String((message as { subtype: string }).subtype);
+        const errMsg = 'errors' in message ? (message.errors as string[]).join('; ') : String((message as ResultMessage).subtype);
         onProgress?.(`Agent ended with: ${errMsg}`);
       }
     }

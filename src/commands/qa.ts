@@ -5,6 +5,10 @@ import { select, input } from '@inquirer/prompts';
 import { getJobByUrl, listJobs } from '../lib/supabase.js';
 import { answerApplicationQuestion } from '../lib/generator.js';
 
+// ============================================================================
+// Command Definition
+// ============================================================================
+
 export const qaCommand = new Command('qa')
   .description('Answer an application question for a tracked job')
   .argument('[url]', 'URL of the job (omit to use --pick)')
@@ -29,7 +33,10 @@ export const qaCommand = new Command('qa')
 
     if (!question) {
       question = await input({ message: 'Question:' });
-      if (!question.trim()) { console.log(chalk.red('No question provided.')); process.exit(1); }
+      if (!question.trim()) {
+        console.log(chalk.red('No question provided.'));
+        process.exit(1);
+      }
     }
 
     const spinner = ora('Looking up job...').start();

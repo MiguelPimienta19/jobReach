@@ -2,6 +2,10 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { listJobs } from '../lib/supabase.js';
 
+// ============================================================================
+// Constants
+// ============================================================================
+
 const STATUS_COLOR: Record<string, (s: string) => string> = {
   pending:   chalk.gray,
   applied:   chalk.blue,
@@ -9,6 +13,10 @@ const STATUS_COLOR: Record<string, (s: string) => string> = {
   offer:     chalk.green,
   rejected:  chalk.red,
 };
+
+// ============================================================================
+// Command Definition
+// ============================================================================
 
 export const listCommand = new Command('list')
   .description('Show all tracked job applications, most recent first')
