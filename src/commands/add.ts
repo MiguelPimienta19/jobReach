@@ -6,6 +6,7 @@ import { extractJobDetails, generateCoverLetter, generateOutreachMessage, genera
 import { sendConnections } from '../lib/linkedin.js';
 import { findPeopleAtCompany } from '../lib/agent.js';
 import { saveJob, saveContact, saveMessage, markMessageSent, getJobByUrl } from '../lib/supabase.js';
+import { resetTokenLog, tokenSummary } from '../lib/tokenLog.js';
 import type { Contact, JobPosting } from '../types.js';
 
 // ============================================================================
@@ -17,6 +18,7 @@ export const addCommand = new Command('add')
   .argument('<url>', 'URL of the job posting')
   .option('--connect', 'Send LinkedIn connection requests automatically after saving')
   .action(async (url: string, opts: { connect?: boolean }) => {
+    resetTokenLog();
     console.log(chalk.bold.blue('\n  jobreach  —  Personal Job Search Assistant\n'));
 
     // Deduplicate — let DB errors surface rather than silently skipping the check
@@ -102,6 +104,12 @@ export const addCommand = new Command('add')
     }
 
     printSummary(job, contacts, coverLetter, saved);
+
+    const tokenReport = tokenSummary();
+    if (tokenReport) {
+      console.log(chalk.dim(tokenReport));
+      console.log();
+    }
 
     if (opts.connect) {
       const withUrls = contacts.filter(c => c.linkedinUrl);

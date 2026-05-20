@@ -71,6 +71,7 @@ Output ONLY a JSON array, no preamble:
 [{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "recruiter" or "university_recruiter" }]`;
 
   let contacts: Contact[] = [];
+  let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheWrite = 0;
 
   for await (const message of query({
     prompt,
@@ -93,6 +94,14 @@ Output ONLY a JSON array, no preamble:
       onProgress?.(`LinkedIn MCP: ${linkedinStatus?.status ?? 'connecting'}`);
 
     } else if (message.type === 'assistant') {
+      const usage = usageFrom(message);
+      if (usage) {
+        inputTokens += usage.input;
+        outputTokens += usage.output;
+        cacheRead += usage.cacheRead;
+        cacheWrite += usage.cacheWrite;
+      }
+
       const textBlocks = message.message.content.filter((b: AgentContentBlock) => b.type === 'text');
 
       if (textBlocks.length > 0) {
@@ -104,6 +113,8 @@ Output ONLY a JSON array, no preamble:
       }
 
     } else if (message.type === 'result') {
+      recordTokens('linkedin search', inputTokens, outputTokens, cacheRead, cacheWrite);
+
       if (message.subtype === 'success') {
         const jsonMatch = message.result.match(/\[[\s\S]*\]/);
 
