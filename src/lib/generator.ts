@@ -28,10 +28,10 @@ async function generate(prompt: string): Promise<string> {
       settingSources: [],
     },
   })) {
-    if (message.type === 'result' && message.subtype === 'success') return message.result.trim();
-    if (message.type === 'result' && message.subtype !== 'success') {
-      const err = 'errors' in message ? (message.errors as string[]).join('; ') : message.subtype;
-      throw new Error(`Generation agent failed: ${err}`);
+    if (message.type === 'result') {
+      const r = message as { type: 'result'; subtype: string; result?: string; errors?: string[] };
+      if (r.subtype === 'success') return (r.result ?? '').trim();
+      throw new Error(`Generation agent failed: ${r.errors?.join('; ') ?? r.subtype}`);
     }
   }
   throw new Error('Generation agent completed without producing a result');
@@ -96,6 +96,23 @@ Rules:
 - No "I came across your profile"
 - Natural and direct
 - Don't start with "Hi" as the literal first word — vary the opening`);
+}
+
+export async function generateConnectionNote(job: JobPosting, contact: Contact): Promise<string> {
+  const note = await generate(`Write a LinkedIn CONNECTION REQUEST NOTE from Miguel to ${contact.name} (${contact.title} at ${contact.company}).
+
+Output ONLY the note text — nothing else. Ready to paste.
+
+Context: ${ROLE_CONTEXT[contact.roleType]}
+Job applied for: ${job.title} at ${job.company}
+
+Rules:
+- HARD LIMIT: 280 characters total (LinkedIn caps at 300, stay under)
+- One short paragraph, no line breaks
+- Mention the specific role
+- Natural and direct — not a cover letter
+- Don't start with "Hi" as the literal first word`);
+  return note.slice(0, 280);
 }
 
 export async function answerApplicationQuestion(job: JobPosting, question: string): Promise<string> {

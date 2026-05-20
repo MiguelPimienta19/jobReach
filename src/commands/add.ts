@@ -2,7 +2,8 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { scrapeJobPosting } from '../lib/scraper.js';
-import { extractJobDetails, generateCoverLetter, generateOutreachMessage } from '../lib/generator.js';
+import { extractJobDetails, generateCoverLetter, generateOutreachMessage, generateConnectionNote } from '../lib/generator.js';
+import { sendConnections } from '../lib/linkedin.js';
 import { findPeopleAtCompany } from '../lib/agent.js';
 import { saveJob, saveContact, saveMessage, getJobByUrl } from '../lib/supabase.js';
 import type { Contact, JobPosting } from '../types.js';
@@ -10,7 +11,8 @@ import type { Contact, JobPosting } from '../types.js';
 export const addCommand = new Command('add')
   .description('Add a job posting and generate outreach materials')
   .argument('<url>', 'URL of the job posting')
-  .action(async (url: string) => {
+  .option('--connect', 'Send LinkedIn connection requests automatically after saving')
+  .action(async (url: string, opts: { connect?: boolean }) => {
     console.log(chalk.bold.blue('\n  jobreach  —  Personal Job Search Assistant\n'));
 
     // Deduplicate — let DB errors surface rather than silently skipping the check
@@ -64,17 +66,16 @@ export const addCommand = new Command('add')
       parallelSpinner.warn(`Parallel step error (continuing): ${e}`);
     }
 
-    // All outreach messages in parallel
+    // All outreach messages + connection notes in parallel
     if (contacts.length > 0) {
-      const msgSpinner = ora('Generating outreach messages...').start();
+      const msgSpinner = ora('Generating outreach messages & connection notes...').start();
       await Promise.all(contacts.map(async contact => {
-        try {
-          contact.outreachMessage = await generateOutreachMessage({ ...job, coverLetter, status: 'pending' }, contact);
-        } catch {
-          contact.outreachMessage = '';
-        }
+        const jobPosting = { ...job, coverLetter, status: 'pending' as const };
+        const [msg, note] = await Promise.allSettled([generateOutreachMessage(jobPosting, contact), generateConnectionNote(jobPosting, contact)]);
+        contact.outreachMessage = msg.status === 'fulfilled' ? msg.value : '';
+        contact.connectionNote = note.status === 'fulfilled' ? note.value : '';
       }));
-      msgSpinner.succeed('Outreach messages ready');
+      msgSpinner.succeed('Outreach messages & connection notes ready');
     }
 
     // Persist
@@ -91,6 +92,14 @@ export const addCommand = new Command('add')
     }
 
     printSummary(job, contacts, coverLetter);
+
+    if (opts.connect) {
+      const withUrls = contacts.filter(c => c.linkedinUrl);
+      if (withUrls.length > 0) {
+        const jobPosting = { ...job, coverLetter, status: 'pending' as const };
+        await sendConnections(jobPosting, withUrls);
+      }
+    }
   });
 
 function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, contacts: Contact[], coverLetter: string) {

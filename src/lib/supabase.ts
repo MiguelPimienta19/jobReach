@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { JobPosting, Contact } from '../types.js';
 
-function getClient() {
+export function getClient() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env');
@@ -39,9 +39,31 @@ export async function saveContact(contact: Contact): Promise<string> {
     company: contact.company,
     role_type: contact.roleType,
     outreach_message: contact.outreachMessage ?? null,
+    connection_note: contact.connectionNote ?? null,
   }, { onConflict: 'job_id,name' }).select('id').single();
   if (error) throw new Error(`Supabase error saving contact: ${error.message}`);
   return data.id as string;
+}
+
+export async function getContactsForJob(jobId: string): Promise<Array<{ contactId: string; name: string; title: string; linkedinUrl?: string; roleType: string; connectionNote?: string; messageId?: string; messageContent?: string }>> {
+  const { data } = await getClient().from('contacts').select('id, name, title, linkedin_url, role_type, connection_note, messages(id, content, status)').eq('job_id', jobId);
+  return (data ?? []).map((c: { id: string; name: string; title: string; linkedin_url?: string; role_type: string; connection_note?: string; messages?: Array<{ id: string; content: string; status: string }> }) => {
+    const draft = c.messages?.find(m => m.status === 'draft');
+    return { contactId: c.id, name: c.name, title: c.title, linkedinUrl: c.linkedin_url ?? undefined, roleType: c.role_type, connectionNote: c.connection_note ?? undefined, messageId: draft?.id, messageContent: draft?.content };
+  });
+}
+
+export async function updateConnectionNote(contactId: string, note: string): Promise<void> {
+  await getClient().from('contacts').update({ connection_note: note }).eq('id', contactId);
+}
+
+export async function markMessageSent(messageId: string): Promise<void> {
+  await getClient().from('messages').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', messageId);
+}
+
+export async function listJobs(): Promise<Array<{ id: string; url: string; company: string; title: string; status: string; created_at: string }>> {
+  const { data } = await getClient().from('jobs').select('id, url, company, title, status, created_at').order('created_at', { ascending: false });
+  return data ?? [];
 }
 
 export async function saveMessage(contactId: string, jobId: string, content: string, platform = 'linkedin'): Promise<void> {

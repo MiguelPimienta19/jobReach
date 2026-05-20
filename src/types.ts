@@ -23,6 +23,7 @@ export interface Contact {
   company: string;
   roleType: RoleType;
   outreachMessage?: string;
+  connectionNote?: string;
 }
 
 export interface BraveWebResult {

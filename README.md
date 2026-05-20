@@ -12,14 +12,26 @@ jobreach add <url>
 2. **Parse** — Claude extracts title, company, description, requirements, location
 3. **Cover letter** — Claude writes a targeted cover letter in your voice
 4. **Recruiter search** — A Claude agent uses the LinkedIn MCP server to find recruiters and university recruiters at the company (runs in parallel with cover letter generation)
-5. **Outreach messages** — Personalized LinkedIn messages generated for each contact
+5. **Outreach messages + connection notes** — A long-form LinkedIn message and a ≤280-char connection request note generated for each contact (in parallel)
 6. **Persist** — Everything saved to Supabase (deduplicates by URL)
 
 ```
-jobreach qa <url> "question"
+jobreach list
 ```
 
-Looks up an already-tracked job from Supabase and answers an application question in your voice, grounded in the stored job context.
+Shows all tracked applications, most recent first, with status.
+
+```
+jobreach qa [url] [question]
+```
+
+Looks up an already-tracked job and answers an application question in your voice. Run without arguments (or with `--pick`) to interactively select from your tracked jobs.
+
+```
+jobreach connect [--yes] [--regen]
+```
+
+Pick a tracked job and send LinkedIn connection requests to its saved contacts. Shows each contact's saved connection note with a confirm prompt before sending. `--regen` regenerates notes fresh; `--yes` skips all confirmations.
 
 ---
 
@@ -58,6 +70,11 @@ SUPABASE_ANON_KEY=your-anon-key-here
 ### 3. Initialize the database
 
 In your Supabase dashboard, open the **SQL Editor** and run the contents of [`supabase/schema.sql`](supabase/schema.sql). This creates three tables (`jobs`, `contacts`, `messages`) with the right indexes and triggers.
+
+If upgrading an existing database, also run:
+```sql
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS connection_note TEXT;
+```
 
 ### 4. Install the LinkedIn MCP server
 
@@ -100,14 +117,29 @@ jobreach add "https://jobs.ashbyhq.com/company/role-id"
 Output includes:
 - Parsed job details (title, company, location, salary if listed)
 - A ready-to-paste cover letter
-- Up to 3 recruiters or university recruiters found on LinkedIn, each with a personalized outreach message
+- Up to 3 recruiters or university recruiters found on LinkedIn, each with a long-form outreach message and a ≤280-char connection note
 
-Running the same URL twice is a no-op — the tool checks Supabase before doing any work.
+Running the same URL twice is a no-op — the tool checks Supabase before doing any work. Add `--connect` to automatically send LinkedIn connection requests immediately after saving.
+
+### List tracked jobs
+
+```bash
+jobreach list
+```
+
+### Send LinkedIn connection requests
+
+```bash
+jobreach connect          # pick a job, review each note, confirm per contact
+jobreach connect --yes    # skip confirmations, send all
+jobreach connect --regen  # regenerate notes before sending
+```
 
 ### Answer an application question
 
 ```bash
-jobreach qa "https://jobs.ashbyhq.com/company/role-id" "What's a technical challenge you've overcome?"
+jobreach qa --pick                                          # interactive job picker
+jobreach qa "https://..." "What's a challenge you've overcome?"
 ```
 
 The job must already exist in Supabase (added via `jobreach add`). The answer is written in first person using the stored job context and your personal background.
@@ -152,8 +184,10 @@ The file is read at startup. No re-build needed after editing it.
 
 | Command | Arguments | Description |
 |---|---|---|
-| `jobreach add` | `<url>` | Scrape a job, generate cover letter + outreach, save to Supabase |
-| `jobreach qa` | `<url> <question>` | Answer an application question for a tracked job |
+| `jobreach add` | `<url> [--connect]` | Scrape a job, generate cover letter + outreach + connection notes, save to Supabase |
+| `jobreach list` | — | Show all tracked applications, newest first |
+| `jobreach qa` | `[url] [question] [--pick]` | Answer an application question for a tracked job |
+| `jobreach connect` | `[--yes] [--regen]` | Send LinkedIn connection requests for a tracked job |
 
 ---
 
@@ -164,7 +198,7 @@ Three tables in Supabase:
 | Table | What it stores |
 |---|---|
 | `jobs` | Job postings — title, company, description, requirements, cover letter, status |
-| `contacts` | Recruiters found per job — name, title, LinkedIn URL, role type |
+| `contacts` | Recruiters found per job — name, title, LinkedIn URL, role type, connection note |
 | `messages` | Outreach messages per contact — content, platform, draft/sent/replied status |
 
 Job status can be: `pending` → `applied` → `interview` → `offer` / `rejected`. Currently managed manually in Supabase; no CLI command for status updates yet.
