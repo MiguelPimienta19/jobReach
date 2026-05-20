@@ -26,7 +26,7 @@ interface ResultMessage {
 // Constants
 // ============================================================================
 
-const VALID_ROLE_TYPES = new Set<RoleType>(['recruiter', 'university_recruiter']);
+const VALID_ROLE_TYPES = new Set<RoleType>(['recruiter', 'university_recruiter', 'alumni', 'engineer']);
 
 // ============================================================================
 // Helpers
@@ -55,20 +55,21 @@ export async function findPeopleAtCompany(company: string, jobTitle: string, onP
   onProgress?.(`Pausing ${Math.round(delay / 1000)}s before LinkedIn search...`);
   await new Promise(r => setTimeout(r, delay));
 
-  const prompt = `Search LinkedIn to find up to 3 people at "${company}" who can directly help someone get hired for a "${jobTitle}" role.
+  const prompt = `Find exactly 3 people at "${company}" to help Miguel (a University of Oregon new grad) land a "${jobTitle}" role. Use only the search_people tool. Do exactly three searches, one per turn, then output the JSON.
 
-Only look for these two types — no one else:
-1. **Recruiters / Talent Acquisition** — people with titles like "Recruiter", "Talent Acquisition", "Staffing"
-2. **University Recruiters / Early Talent** — people with titles like "University Recruiter", "Campus Recruiter", "Early Career", "Early Talent", "University Relations", "New Grad Recruiting"
+Turn 1 — search_people with query "University Recruiter ${company}" (also accept "Campus Recruiter", "Early Career", "Early Talent", "New Grad Recruiting"). Pick the single best match. roleType: "university_recruiter".
 
-University recruiters are the highest priority — they exist specifically to hire new grads.
+Turn 2 — search_people with query "University of Oregon ${company}". Pick one UO alum at the company in any role. If — and only if — there are no plausible UO alumni matches, instead search "Recruiter ${company}" (also accept "Talent Acquisition") and pick one generalist recruiter; set roleType to "recruiter". Otherwise roleType: "alumni".
 
-Use get_company_employees for "${company}" first. If that doesn't give you enough, use search_people with targeted queries.
+Turn 3 — search_people with a query matching the role behind "${jobTitle}" (e.g., "Software Engineer ${company}", "Product Manager ${company}", etc — match the actual title). Pick one current engineer/IC on the team or an adjacent team for a potential referral. Avoid recruiters and managers — we want a working IC. roleType: "engineer".
 
-Return AT MOST 3 people. Quality over quantity — only include people whose title clearly matches the above.
+Rules:
+- Exactly 1 person per slot. Do not return multiples of the same type.
+- If a slot truly has no good match, skip it — better to return 2 than to pad with a bad match.
+- No re-searches, no extra calls beyond the three above.
 
-Output ONLY a JSON array, no preamble:
-[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "recruiter" or "university_recruiter" }]`;
+Output ONLY this JSON array as the final message, no preamble:
+[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "university_recruiter" | "alumni" | "recruiter" | "engineer" }]`;
 
   let contacts: Contact[] = [];
   let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheWrite = 0;
@@ -85,6 +86,7 @@ Output ONLY a JSON array, no preamble:
       },
       allowDangerouslySkipPermissions: true,
       permissionMode: 'bypassPermissions',
+      allowedTools: ['mcp__linkedin__search_people'],
       maxTurns: 3,
       settingSources: [],
     },

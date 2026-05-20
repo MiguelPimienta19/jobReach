@@ -155,7 +155,7 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
     console.log(chalk.gray("  LinkedIn blocks most automated discovery. You'll need to search manually this time."));
   } else {
     contacts.forEach((contact, i) => {
-      const roleLabel = ({ recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter') }[contact.roleType]) ?? chalk.dim(contact.roleType);
+      const roleLabel = ({ recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter'), alumni: chalk.cyan('UO Alum'), engineer: chalk.yellow('Engineer (Referral)') }[contact.roleType]) ?? chalk.dim(contact.roleType);
       console.log(`\n  ${chalk.bold(`${i + 1}. ${contact.name}`)}  ·  ${contact.title}  [${roleLabel}]`);
       if (contact.linkedinUrl) {
         console.log(`     ${chalk.cyan.underline(contact.linkedinUrl)}`);

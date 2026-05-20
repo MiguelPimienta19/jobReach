@@ -173,6 +173,8 @@ Requirements: ${job.requirements ?? 'Not listed'}`, 'coverLetter');
 const ROLE_CONTEXT: Record<Contact['roleType'], string> = {
   recruiter: "This is a recruiter or talent acquisition person. Keep it to one short paragraph. Name the specific role Miguel applied to. Make it effortless for them to act — they get a lot of these.",
   university_recruiter: "This is a university recruiter or early talent person. They specifically hire new grads — this is their whole job. Lead with Miguel graduating June 2026, mention the strongest project in one sentence, and make it very easy for them to respond. These people want to find good new grads, so be direct about that.",
+  alumni: "This is a University of Oregon alum at the company. Open with the shared UO background (one short clause — not gushing). Mention Miguel applied for the specific role. Ask for a quick chat or, if they're open to it, a referral to the hiring team. Warm tone, not a sales pitch. They are NOT a recruiter — don't ask them to act on a req.",
+  engineer: "This is an engineer/IC on or near the team behind the role. Goal is a referral. Lead with one specific, relevant project of Miguel's that maps to what they likely work on (pick from his background). Ask if they'd be open to referring him — make it easy to say yes. Do NOT pitch the company back to them. They get referral bonuses, so the ask is fine if it's specific and quick to act on.",
 };
 
 export async function generateConnectionNote(job: JobPosting, contact: Contact): Promise<string> {

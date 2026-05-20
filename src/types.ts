@@ -3,7 +3,7 @@
 // ============================================================================
 
 export type JobStatus = 'pending' | 'applied' | 'interview' | 'offer' | 'rejected';
-export type RoleType = 'recruiter' | 'university_recruiter';
+export type RoleType = 'recruiter' | 'university_recruiter' | 'alumni' | 'engineer';
 
 // ============================================================================
 // Interfaces
