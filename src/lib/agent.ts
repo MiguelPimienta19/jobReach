@@ -55,21 +55,21 @@ export async function findPeopleAtCompany(company: string, jobTitle: string, onP
   onProgress?.(`Pausing ${Math.round(delay / 1000)}s before LinkedIn search...`);
   await new Promise(r => setTimeout(r, delay));
 
-  const prompt = `Find exactly 3 people at "${company}" to help Miguel (a University of Oregon new grad) land a "${jobTitle}" role. Use only the search_people tool. Do exactly three searches, one per turn, then output the JSON.
+  const prompt = `Find up to 3 people at "${company}" who can help Miguel (a University of Oregon new grad) get hired for a "${jobTitle}" role.
 
-Turn 1 — search_people with query "University Recruiter ${company}" (also accept "Campus Recruiter", "Early Career", "Early Talent", "New Grad Recruiting"). Pick the single best match. roleType: "university_recruiter".
+Step 1 — call get_company_employees for "${company}" to see who's there. If that returns nothing useful, fall back to search_people.
 
-Turn 2 — search_people with query "University of Oregon ${company}". Pick one UO alum at the company in any role. If — and only if — there are no plausible UO alumni matches, instead search "Recruiter ${company}" (also accept "Talent Acquisition") and pick one generalist recruiter; set roleType to "recruiter". Otherwise roleType: "alumni".
+Step 2 — from what you find, pick up to 3 people using this priority order:
+1. Anyone in recruiting, HR, talent acquisition, or people ops — roleType: "recruiter". University/campus/early-talent recruiters are highest priority — roleType: "university_recruiter".
+2. A University of Oregon alum (any role) — roleType: "alumni".
+3. An engineer or IC in a role similar to "${jobTitle}" who could give a referral — roleType: "engineer".
 
-Turn 3 — search_people with a query matching the role behind "${jobTitle}" (e.g., "Software Engineer ${company}", "Product Manager ${company}", etc — match the actual title). Pick one current engineer/IC on the team or an adjacent team for a potential referral. Avoid recruiters and managers — we want a working IC. roleType: "engineer".
+For small companies with no dedicated recruiter, the hiring manager, a senior engineer, or even a founder is a valid pick — anyone who would plausibly see or pass along a resume.
 
-Rules:
-- Exactly 1 person per slot. Do not return multiples of the same type.
-- If a slot truly has no good match, skip it — better to return 2 than to pad with a bad match.
-- No re-searches, no extra calls beyond the three above.
+Skip a slot if there is truly no reasonable match. Return 1–3 people, never 0 if anyone at the company is visible.
 
 Output ONLY this JSON array as the final message, no preamble:
-[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "university_recruiter" | "alumni" | "recruiter" | "engineer" }]`;
+[{ "name": "...", "title": "...", "linkedinUrl": "https://linkedin.com/in/...", "roleType": "recruiter" | "university_recruiter" | "alumni" | "engineer" }]`;
 
   let contacts: Contact[] = [];
   let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheWrite = 0;
@@ -86,8 +86,7 @@ Output ONLY this JSON array as the final message, no preamble:
       },
       allowDangerouslySkipPermissions: true,
       permissionMode: 'bypassPermissions',
-      allowedTools: ['mcp__linkedin__search_people'],
-      maxTurns: 3,
+      maxTurns: 8,
       settingSources: [],
     },
   })) {
