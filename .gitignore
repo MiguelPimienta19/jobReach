@@ -5,3 +5,4 @@ dist/
 context/
 NEXT_STEPS.md
 .claude
+supabase/.temp

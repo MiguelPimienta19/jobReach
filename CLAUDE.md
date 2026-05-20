@@ -65,15 +65,27 @@ Sends LinkedIn connection requests for a previously tracked job. Interactive job
 
 Both use `query()` from `@anthropic-ai/claude-agent-sdk`, but differently:
 
-- **`agent.ts`** — multi-turn agentic loop (`maxTurns: 10`) with the `linkedin-scraper-mcp` MCP server attached. Uses `get_company_employees` and `search_people` to find recruiters and university recruiters (max 3). Streams messages from the loop and parses the final JSON array of contacts from the terminal `result` message. Runs with `allowDangerouslySkipPermissions: true` and `permissionMode: 'bypassPermissions'`.
-- **`generator.ts`** — single-turn (`maxTurns: 1`), no tools (`allowedTools: []`, `permissionMode: 'dontAsk'`), just text generation. All generation functions share a `MY_BACKGROUND` system prompt that reads from `context/me.md` at module load (with a hardcoded fallback bio if the file is missing).
-- **`linkedin.ts`** — uses `query()` to drive the LinkedIn MCP's `connect_with_person` tool, sending a connection request with a specific note. Runs per-contact with progress streamed through `ora` spinners.
+- **`agent.ts`** — multi-turn agentic loop (`maxTurns: 10`) with the `linkedin-scraper-mcp` MCP server attached. Uses `get_company_employees` and `search_people` to find recruiters and university recruiters (max 3). Streams messages from the loop and parses the final JSON array of contacts from the terminal `result` message. Runs with `allowDangerouslySkipPermissions: true` and `permissionMode: 'bypassPermissions'`. Local interfaces: `AgentContentBlock`, `AgentTextBlock`, `RawContactResult`, `ResultMessage`.
+- **`generator.ts`** — single-turn (`maxTurns: 1`), no tools (`allowedTools: []`, `permissionMode: 'dontAsk'`), just text generation. All generation functions share a `MY_BACKGROUND` system prompt that reads from `context/me.md` at module load (with a hardcoded fallback bio if the file is missing). Local interfaces: `ResultMessage`, `ParsedJobDetails`. **Currently only loads `context/me.md`** — `resume.md`, `targets.md`, and `writing-samples.md` are present but not yet wired in (see NEXT_STEPS.md).
+- **`linkedin.ts`** — uses `query()` to drive the LinkedIn MCP's `connect_with_person` tool, sending a connection request with a specific note. Runs per-contact with progress streamed through `ora` spinners. Local interfaces: `ContentBlock`, `TextContent`, `ResultMessage`.
 
 ### Personalization context (`context/`)
 
 The `context/` directory holds personal background that the generator reads at runtime:
-- `me.md` — bio injected into the system prompt for all `generator.ts` calls (cover letter, outreach, connection note, qa). **This is the canonical place to edit personality/background** — don't edit the fallback string in `generator.ts`.
-- `resume.md`, `targets.md`, `writing-samples.md` — not currently loaded by code but kept as reference material.
+- `me.md` — bio injected into the system prompt for all `generator.ts` calls. **The canonical place to edit personality, background, tone.** Don't edit the fallback string in `generator.ts`.
+- `resume.md`, `targets.md`, `writing-samples.md` — **exist but are not yet loaded by code.** The planned change is a `loadContext()` function in `generator.ts` that concatenates all four files. Until that change is made, only `me.md` is active.
+
+### Code style
+
+All source files follow a strict structural blueprint applied in May 2026:
+- Function signatures on a single line
+- Explicit `{}` braces on every `if`/`for`/`while`/`try`/`catch`/`finally`, body on its own line
+- Multi-line return objects for 3+ keys with trailing commas
+- Section banner comments (`// === ... ===`) to group logical layers
+- Local interfaces declared at the top of each file (no inline casts in loops/maps)
+- Vertical whitespace between logical steps inside functions
+
+Do not collapse `if` blocks onto one line. Do not skip braces. Keep this style consistent.
 
 ### Database schema (`supabase/schema.sql`)
 
