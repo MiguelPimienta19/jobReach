@@ -25,7 +25,7 @@ jobreach connect [--yes] [--regen]
 
 Requires a `.env` file at the project root (see `.env.example`):
 - `SUPABASE_URL` — Supabase project URL
-- `SUPABASE_ANON_KEY` — Supabase anon/public key
+- `SUPABASE_SECRET_KEY` — Supabase secret key (`sb_secret_...`). Replaces the legacy `service_role` key. Used because jobreach is a user-controlled local CLI with full read/write needs and no RLS — that's a "trusted backend" context, not a public client.
 
 The Agent SDK (`@anthropic-ai/claude-agent-sdk`) uses the user's Claude Code subscription — no separate Anthropic API key is needed.
 
@@ -81,11 +81,7 @@ Three tables: `jobs` (one row per URL, unique on `url`), `contacts` (many per jo
 
 The TypeScript field names use camelCase while Supabase columns use snake_case — the mapping happens in `src/lib/supabase.ts`.
 
-**Heads-up:** `supabase/schema.sql` is out of sync with what the code expects:
-- Missing `connection_note TEXT` column on `contacts` (referenced by `saveContact`, `getContactsForJob`, `updateConnectionNote`)
-- Missing comma after the `UNIQUE (job_id, name)` constraint (would prevent a fresh `CREATE TABLE` from running)
-
-If you re-run the schema on a fresh database, fix these first.
+If you ran an older version of the schema on an existing database, run the migration at the bottom of `supabase/schema.sql` to add the `connection_note` column.
 
 ### Module system
 

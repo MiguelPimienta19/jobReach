@@ -55,7 +55,13 @@ ${rawText.slice(0, 8000)}`);
 
   const match = result.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('Could not parse job details from page content');
-  const parsed = JSON.parse(match[0]);
+  let parsed: { company?: string; title?: string; description?: string; location?: string; salaryRange?: string; requirements?: string };
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    throw new Error('Model returned malformed JSON for job details — try re-running');
+  }
+  if (!parsed.company || !parsed.title || !parsed.description) throw new Error('Model returned JSON missing required job fields (company, title, description)');
   return { url, company: parsed.company, title: parsed.title, description: parsed.description, location: parsed.location ?? undefined, salaryRange: parsed.salaryRange ?? undefined, requirements: parsed.requirements ?? undefined };
 }
 

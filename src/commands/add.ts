@@ -5,7 +5,7 @@ import { scrapeJobPosting } from '../lib/scraper.js';
 import { extractJobDetails, generateCoverLetter, generateOutreachMessage, generateConnectionNote } from '../lib/generator.js';
 import { sendConnections } from '../lib/linkedin.js';
 import { findPeopleAtCompany } from '../lib/agent.js';
-import { saveJob, saveContact, saveMessage, getJobByUrl } from '../lib/supabase.js';
+import { saveJob, saveContact, saveMessage, markMessageSent, getJobByUrl } from '../lib/supabase.js';
 import type { Contact, JobPosting } from '../types.js';
 
 export const addCommand = new Command('add')
@@ -80,29 +80,45 @@ export const addCommand = new Command('add')
 
     // Persist
     const saveSpinner = ora('Saving to Supabase...').start();
+    const messageIdByContact = new Map<Contact, string>();
+    let saved = false;
     try {
       const jobId = await saveJob({ ...job, coverLetter, status: 'pending' });
       for (const contact of contacts) {
         const contactId = await saveContact({ ...contact, jobId });
-        if (contact.outreachMessage) await saveMessage(contactId, jobId, contact.outreachMessage);
+        if (contact.outreachMessage) {
+          const messageId = await saveMessage(contactId, jobId, contact.outreachMessage);
+          messageIdByContact.set(contact, messageId);
+        }
       }
       saveSpinner.succeed('Saved to Supabase');
+      saved = true;
     } catch (e) {
       saveSpinner.warn(`Supabase save failed (continuing): ${e}`);
     }
 
-    printSummary(job, contacts, coverLetter);
+    printSummary(job, contacts, coverLetter, saved);
 
     if (opts.connect) {
       const withUrls = contacts.filter(c => c.linkedinUrl);
       if (withUrls.length > 0) {
+        // Pause between LinkedIn scraping (just happened) and the first connection send,
+        // so the back-to-back scrape→write doesn't look like a velocity spike to LinkedIn.
+        const gapSpinner = ora(chalk.dim('Pausing 15s before sending requests...')).start();
+        try { await new Promise(r => setTimeout(r, 15000)); } finally { gapSpinner.stop(); }
+
         const jobPosting = { ...job, coverLetter, status: 'pending' as const };
-        await sendConnections(jobPosting, withUrls);
+        const results = await sendConnections(jobPosting, withUrls);
+        for (const { contact, success } of results) {
+          if (!success) continue;
+          const messageId = messageIdByContact.get(contact);
+          if (messageId) await markMessageSent(messageId).catch(() => {});
+        }
       }
     }
   });
 
-function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, contacts: Contact[], coverLetter: string) {
+function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, contacts: Contact[], coverLetter: string, saved: boolean) {
   const W = 62;
   const line = '─'.repeat(W);
   const div = chalk.bold.green('  ' + line);
@@ -157,6 +173,6 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
   }
 
   console.log('\n' + div);
-  console.log(chalk.bold.green('  Saved to Supabase. Good luck.'));
+  console.log(saved ? chalk.bold.green('  Saved to Supabase. Good luck.') : chalk.bold.yellow('  Not saved to Supabase — see warning above. Good luck.'));
   console.log(div + '\n');
 }

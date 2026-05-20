@@ -4,7 +4,7 @@ import ora from 'ora';
 import { select, confirm } from '@inquirer/prompts';
 import { listJobs, getContactsForJob, markMessageSent, updateConnectionNote } from '../lib/supabase.js';
 import { generateConnectionNote } from '../lib/generator.js';
-import { sendConnections } from '../lib/linkedin.js';
+import { sendConnections, jitterBetweenSends } from '../lib/linkedin.js';
 import type { JobPosting, Contact } from '../types.js';
 
 export const connectCommand = new Command('connect')
@@ -49,13 +49,19 @@ export const connectCommand = new Command('connect')
     if (opts.yes) {
       const jobPosting: JobPosting = { id: job.id, url: job.url, company: job.company, title: job.title, description: '', status: 'pending' };
       const contactObjs: Contact[] = withUrls.map(c => ({ name: c.name, title: c.title, linkedinUrl: c.linkedinUrl, company: job.company, roleType: c.roleType as 'recruiter' | 'university_recruiter', connectionNote: c.connectionNote }));
-      await sendConnections(jobPosting, contactObjs);
-      for (const c of withUrls) { if (c.messageId) await markMessageSent(c.messageId).catch(() => {}); }
+      const objToOrig = new Map(contactObjs.map((co, i) => [co, withUrls[i]]));
+      const results = await sendConnections(jobPosting, contactObjs);
+      for (const { contact, success } of results) {
+        if (!success) continue;
+        const orig = objToOrig.get(contact);
+        if (orig?.messageId) await markMessageSent(orig.messageId).catch(() => {});
+      }
       return;
     }
 
     console.log(chalk.bold.blue(`\n  ${withUrls.length} contact${withUrls.length !== 1 ? 's' : ''} for ${job.company} — ${job.title}\n`));
 
+    let sentAny = false;
     for (const contact of withUrls) {
       const jobPosting: JobPosting = { id: job.id, url: job.url, company: job.company, title: job.title, description: '', status: 'pending' };
       const contactObj: Contact = { name: contact.name, title: contact.title, linkedinUrl: contact.linkedinUrl, company: job.company, roleType: contact.roleType as 'recruiter' | 'university_recruiter', connectionNote: contact.connectionNote };
@@ -72,7 +78,13 @@ export const connectCommand = new Command('connect')
       const proceed = await confirm({ message: `Send to ${contact.name}?`, default: true });
       if (!proceed) { console.log(chalk.dim('  Skipped.\n')); continue; }
 
-      await sendConnections(jobPosting, [contactObj]);
-      if (contact.messageId) await markMessageSent(contact.messageId).catch(() => {});
+      // Jitter between successful sends — sendConnections's internal jitter doesn't fire
+      // here because we call it one-at-a-time per confirmation
+      if (sentAny) await jitterBetweenSends();
+      const [result] = await sendConnections(jobPosting, [contactObj]);
+      if (result?.success) {
+        sentAny = true;
+        if (contact.messageId) await markMessageSent(contact.messageId).catch(() => {});
+      }
     }
   });

@@ -24,9 +24,10 @@ CREATE TABLE IF NOT EXISTS contacts (
   linkedin_url     TEXT,
   company          TEXT        NOT NULL,
   role_type        TEXT        NOT NULL,  -- recruiter | university_recruiter
-  UNIQUE (job_id, name)
   outreach_message TEXT,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  connection_note  TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (job_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -52,3 +53,6 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE TRIGGER jobs_updated_at
   BEFORE UPDATE ON jobs
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- If you already ran an older version of this schema, run these migrations once:
+-- ALTER TABLE contacts ADD COLUMN IF NOT EXISTS connection_note TEXT;

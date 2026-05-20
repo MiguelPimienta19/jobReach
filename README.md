@@ -64,7 +64,7 @@ Open `.env` and fill in your Supabase credentials:
 
 ```env
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_SECRET_KEY=sb_secret_your_key_here
 ```
 
 ### 3. Initialize the database
