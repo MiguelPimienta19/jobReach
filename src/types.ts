@@ -30,7 +30,6 @@ export interface Contact {
   linkedinUrl?: string;
   company: string;
   roleType: RoleType;
-  outreachMessage?: string;
   connectionNote?: string;
 }
 

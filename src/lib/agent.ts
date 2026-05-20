@@ -85,7 +85,7 @@ Output ONLY a JSON array, no preamble:
       },
       allowDangerouslySkipPermissions: true,
       permissionMode: 'bypassPermissions',
-      maxTurns: 10,
+      maxTurns: 3,
       settingSources: [],
     },
   })) {

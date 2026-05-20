@@ -2,10 +2,10 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { scrapeJobPosting } from '../lib/scraper.js';
-import { extractJobDetails, generateCoverLetter, generateOutreachMessage, generateConnectionNote } from '../lib/generator.js';
+import { extractJobDetails, generateCoverLetter, generateConnectionNote } from '../lib/generator.js';
 import { sendConnections } from '../lib/linkedin.js';
 import { findPeopleAtCompany } from '../lib/agent.js';
-import { saveJob, saveContact, saveMessage, markMessageSent, getJobByUrl } from '../lib/supabase.js';
+import { saveJob, saveContact, getJobByUrl } from '../lib/supabase.js';
 import { resetTokenLog, tokenSummary } from '../lib/tokenLog.js';
 import type { Contact, JobPosting } from '../types.js';
 
@@ -72,30 +72,24 @@ export const addCommand = new Command('add')
       parallelSpinner.warn(`Parallel step error (continuing): ${e}`);
     }
 
-    // All outreach messages + connection notes in parallel
+    // Generate connection notes in parallel
     if (contacts.length > 0) {
-      const msgSpinner = ora('Generating outreach messages & connection notes...').start();
+      const msgSpinner = ora('Generating connection notes...').start();
       await Promise.all(contacts.map(async contact => {
         const jobPosting = { ...job, coverLetter, status: 'pending' as const };
-        const [msg, note] = await Promise.allSettled([generateOutreachMessage(jobPosting, contact), generateConnectionNote(jobPosting, contact)]);
-        contact.outreachMessage = msg.status === 'fulfilled' ? msg.value : '';
-        contact.connectionNote = note.status === 'fulfilled' ? note.value : '';
+        const note = await generateConnectionNote(jobPosting, contact).catch(() => '');
+        contact.connectionNote = note;
       }));
-      msgSpinner.succeed('Outreach messages & connection notes ready');
+      msgSpinner.succeed('Connection notes ready');
     }
 
     // Persist
     const saveSpinner = ora('Saving to Supabase...').start();
-    const messageIdByContact = new Map<Contact, string>();
     let saved = false;
     try {
       const jobId = await saveJob({ ...job, coverLetter, status: 'pending' });
       for (const contact of contacts) {
-        const contactId = await saveContact({ ...contact, jobId });
-        if (contact.outreachMessage) {
-          const messageId = await saveMessage(contactId, jobId, contact.outreachMessage);
-          messageIdByContact.set(contact, messageId);
-        }
+        await saveContact({ ...contact, jobId });
       }
       saveSpinner.succeed('Saved to Supabase');
       saved = true;
@@ -124,16 +118,7 @@ export const addCommand = new Command('add')
         }
 
         const jobPosting = { ...job, coverLetter, status: 'pending' as const };
-        const results = await sendConnections(jobPosting, withUrls);
-        for (const { contact, success } of results) {
-          if (!success) {
-            continue;
-          }
-          const messageId = messageIdByContact.get(contact);
-          if (messageId) {
-            await markMessageSent(messageId).catch(() => {});
-          }
-        }
+        await sendConnections(jobPosting, withUrls);
       }
     }
   });
@@ -177,31 +162,8 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
       } else {
         console.log(`     ${chalk.dim('No LinkedIn URL found')}`);
       }
-      if (contact.outreachMessage) {
-        console.log();
-        const msgLines = contact.outreachMessage.split('\n');
-        const innerW = W - 6;
-        console.log('     ' + chalk.dim('┌' + '─'.repeat(innerW) + '┐'));
-        for (const raw of msgLines) {
-          const words = raw.split(' ');
-          const wrapped: string[] = [];
-          let current = '';
-          for (const word of words) {
-            if ((current + ' ' + word).trim().length > innerW - 2) {
-              wrapped.push(current.trim());
-              current = word;
-            } else {
-              current = (current + ' ' + word).trim();
-            }
-          }
-          if (current) {
-            wrapped.push(current);
-          }
-          for (const wl of wrapped) {
-            console.log('     ' + chalk.dim('│') + ' ' + chalk.white(wl.padEnd(innerW - 2)) + ' ' + chalk.dim('│'));
-          }
-        }
-        console.log('     ' + chalk.dim('└' + '─'.repeat(innerW) + '┘'));
+      if (contact.connectionNote) {
+        console.log(chalk.dim(`\n     Note (${contact.connectionNote.length}/280): `) + chalk.white(contact.connectionNote));
       }
     });
   }

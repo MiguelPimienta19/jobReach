@@ -12,7 +12,6 @@ interface RawContactRow {
   linkedin_url?: string;
   role_type: string;
   connection_note?: string;
-  messages?: Array<{ id: string; content: string; status: string }>;
 }
 
 export interface ContactRow {
@@ -22,8 +21,6 @@ export interface ContactRow {
   linkedinUrl?: string;
   roleType: string;
   connectionNote?: string;
-  messageId?: string;
-  messageContent?: string;
 }
 
 export interface JobListRow {
@@ -121,7 +118,6 @@ export async function saveContact(contact: Contact): Promise<string> {
     linkedin_url: contact.linkedinUrl ?? null,
     company: contact.company,
     role_type: contact.roleType,
-    outreach_message: contact.outreachMessage ?? null,
     connection_note: contact.connectionNote ?? null,
   }, { onConflict: 'job_id,name' }).select('id').single();
 
@@ -133,26 +129,20 @@ export async function saveContact(contact: Contact): Promise<string> {
 }
 
 export async function getContactsForJob(jobId: string): Promise<ContactRow[]> {
-  const { data, error } = await getClient().from('contacts').select('id, name, title, linkedin_url, role_type, connection_note, messages(id, content, status)').eq('job_id', jobId);
+  const { data, error } = await getClient().from('contacts').select('id, name, title, linkedin_url, role_type, connection_note').eq('job_id', jobId);
 
   if (error) {
     throw new Error(`Supabase error fetching contacts: ${error.message}`);
   }
 
-  return (data ?? []).map((c: RawContactRow) => {
-    const draft = c.messages?.find(m => m.status === 'draft');
-
-    return {
-      contactId: c.id,
-      name: c.name,
-      title: c.title,
-      linkedinUrl: c.linkedin_url ?? undefined,
-      roleType: c.role_type,
-      connectionNote: c.connection_note ?? undefined,
-      messageId: draft?.id,
-      messageContent: draft?.content,
-    };
-  });
+  return (data ?? []).map((c: RawContactRow) => ({
+    contactId: c.id,
+    name: c.name,
+    title: c.title,
+    linkedinUrl: c.linkedin_url ?? undefined,
+    roleType: c.role_type,
+    connectionNote: c.connection_note ?? undefined,
+  }));
 }
 
 export async function updateConnectionNote(contactId: string, note: string): Promise<void> {

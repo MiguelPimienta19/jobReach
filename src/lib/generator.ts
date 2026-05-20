@@ -113,7 +113,7 @@ export async function extractJobDetails(rawText: string, url: string): Promise<O
 Job URL: ${url}
 
 Text:
-${rawText.slice(0, 8000)}`, 'extract');
+${rawText.slice(0, 4000)}`, 'extract');
 
   const match = result.match(/\{[\s\S]*\}/);
 
@@ -167,29 +167,13 @@ Requirements: ${job.requirements ?? 'Not listed'}`, 'coverLetter');
 }
 
 // ============================================================================
-// Outreach Generation
+// Connection Note Generation
 // ============================================================================
 
 const ROLE_CONTEXT: Record<Contact['roleType'], string> = {
   recruiter: "This is a recruiter or talent acquisition person. Keep it to one short paragraph. Name the specific role Miguel applied to. Make it effortless for them to act — they get a lot of these.",
   university_recruiter: "This is a university recruiter or early talent person. They specifically hire new grads — this is their whole job. Lead with Miguel graduating June 2026, mention the strongest project in one sentence, and make it very easy for them to respond. These people want to find good new grads, so be direct about that.",
 };
-
-export async function generateOutreachMessage(job: JobPosting, contact: Contact): Promise<string> {
-  return generate(`Write a LinkedIn outreach message from Miguel to ${contact.name} (${contact.title} at ${contact.company}).
-
-Output ONLY the message text — no intro, no "Here's a message:", no word count, no "---". Just the message, ready to paste into LinkedIn.
-
-Context: ${ROLE_CONTEXT[contact.roleType]}
-Job applied for: ${job.title} at ${job.company}
-
-Rules:
-- Max 100 words
-- No "I hope this message finds you well"
-- No "I came across your profile"
-- Natural and direct
-- Don't start with "Hi" as the literal first word — vary the opening`, 'outreach');
-}
 
 export async function generateConnectionNote(job: JobPosting, contact: Contact): Promise<string> {
   const note = await generate(`Write a LinkedIn CONNECTION REQUEST NOTE from Miguel to ${contact.name} (${contact.title} at ${contact.company}).

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { select, confirm } from '@inquirer/prompts';
-import { listJobs, getContactsForJob, markMessageSent, updateConnectionNote } from '../lib/supabase.js';
+import { listJobs, getContactsForJob, updateConnectionNote } from '../lib/supabase.js';
 import { generateConnectionNote } from '../lib/generator.js';
 import { sendConnections, jitterBetweenSends } from '../lib/linkedin.js';
 import type { JobPosting, Contact } from '../types.js';
@@ -85,17 +85,7 @@ export const connectCommand = new Command('connect')
         roleType: c.roleType as ConnectionRoleType,
         connectionNote: c.connectionNote,
       }));
-      const objToOrig = new Map(contactObjs.map((co, i) => [co, withUrls[i]]));
-      const results = await sendConnections(jobPosting, contactObjs);
-      for (const { contact, success } of results) {
-        if (!success) {
-          continue;
-        }
-        const orig = objToOrig.get(contact);
-        if (orig?.messageId) {
-          await markMessageSent(orig.messageId).catch(() => {});
-        }
-      }
+      await sendConnections(jobPosting, contactObjs);
       return;
     }
 
@@ -146,9 +136,6 @@ export const connectCommand = new Command('connect')
       const [result] = await sendConnections(jobPosting, [contactObj]);
       if (result?.success) {
         sentAny = true;
-        if (contact.messageId) {
-          await markMessageSent(contact.messageId).catch(() => {});
-        }
       }
     }
   });

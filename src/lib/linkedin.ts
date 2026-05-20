@@ -52,7 +52,7 @@ export async function jitterBetweenSends(): Promise<void> {
 async function sendOneRequest(linkedinUrl: string, note: string, onProgress?: (msg: string) => void): Promise<boolean> {
   for await (const message of query({
     prompt: `Use connect_with_person to send a connection request to ${linkedinUrl} with this exact note: "${note}"`,
-    options: { mcpServers: { linkedin: LINKEDIN_MCP }, allowDangerouslySkipPermissions: true, permissionMode: 'bypassPermissions', maxTurns: 5, settingSources: [] },
+    options: { mcpServers: { linkedin: LINKEDIN_MCP }, allowDangerouslySkipPermissions: true, permissionMode: 'bypassPermissions', maxTurns: 2, settingSources: [] },
   })) {
     if (message.type === 'assistant') {
       const text = message.message.content.find((b: ContentBlock) => b.type === 'text') as TextContent | undefined;
