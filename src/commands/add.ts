@@ -14,7 +14,7 @@ import type { Contact, JobPosting } from '../types.js';
 // ============================================================================
 
 export const addCommand = new Command('add')
-  .description('Add a job posting and generate outreach materials')
+  .description('Add a job posting and generate a cover letter and connection notes')
   .argument('<url>', 'URL of the job posting')
   .option('--connect', 'Send LinkedIn connection requests automatically after saving')
   .action(async (url: string, opts: { connect?: boolean }) => {
@@ -147,7 +147,7 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
   }
 
   // Contacts
-  console.log('\n' + chalk.bold.white(`  OUTREACH  ${contacts.length === 0 ? chalk.yellow('(none found)') : chalk.green(`(${contacts.length} found)`)}`));
+  console.log('\n' + chalk.bold.white(`  CONTACTS  ${contacts.length === 0 ? chalk.yellow('(none found)') : chalk.green(`(${contacts.length} found)`)}`));
   console.log(chalk.dim('  ' + line));
 
   if (contacts.length === 0) {

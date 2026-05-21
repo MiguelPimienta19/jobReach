@@ -41,7 +41,7 @@ CLI entrypoint `src/index.ts` registers four commands. Each command drives a mul
 2. Scrape the job URL via Playwright headless Chrome (`src/lib/scraper.ts`)
 3. Extract structured job fields — `extractJobDetails()` in `src/lib/generator.ts`
 4. **In parallel:** generate cover letter + find contacts via LinkedIn MCP (`findPeopleAtCompany()` in `src/lib/agent.ts`)
-5. **In parallel per contact:** generate LinkedIn outreach message + 280-char connection note (`generateOutreachMessage()`, `generateConnectionNote()` in `src/lib/generator.ts`)
+5. **In parallel per contact:** generate a ≤280-char LinkedIn connection note (`generateConnectionNote()` in `src/lib/generator.ts`)
 6. Persist everything to Supabase (jobs → contacts → messages)
 7. Print a formatted terminal summary
 8. If `--connect` is passed: send LinkedIn connection requests for every contact with a `linkedinUrl` via `sendConnections()` in `src/lib/linkedin.ts`
@@ -93,7 +93,7 @@ Three tables: `jobs` (one row per URL, unique on `url`), `contacts` (many per jo
 
 The TypeScript field names use camelCase while Supabase columns use snake_case — the mapping happens in `src/lib/supabase.ts`.
 
-If you ran an older version of the schema on an existing database, run the migration at the bottom of `supabase/schema.sql` to add the `connection_note` column.
+Run `supabase/schema.sql` in the Supabase SQL Editor to initialize the database. The file reflects the current canonical schema.
 
 ### Module system
 
