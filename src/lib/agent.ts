@@ -1,6 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Contact, RoleType } from '../types.js';
 import { recordTokens } from './tokenLog.js';
+import { loadProfile } from './profile.js';
 
 interface AgentContentBlock {
   type: string;
@@ -55,13 +56,25 @@ export async function findPeopleAtCompany(company: string, jobTitle: string, onP
   onProgress?.(`Pausing ${Math.round(delay / 1000)}s before LinkedIn search...`);
   await new Promise(r => setTimeout(r, delay));
 
-  const prompt = `Find up to 3 people at "${company}" who can help Miguel (a University of Oregon new grad) get hired for a "${jobTitle}" role.
+  const profile = loadProfile();
+
+  const candidateDescriptor = [profile.school, profile.gradMonth ? 'new grad' : null]
+    .filter(Boolean)
+    .join(' ');
+
+  const candidateClause = candidateDescriptor ? ` (a ${candidateDescriptor})` : '';
+
+  const alumniStep = profile.school
+    ? `2. A ${profile.school} alum (any role) — roleType: "alumni".`
+    : `2. A generalist recruiter or hiring partner anywhere in the org — roleType: "recruiter".`;
+
+  const prompt = `Find up to 3 people at "${company}" who can help ${profile.name}${candidateClause} get hired for a "${jobTitle}" role.
 
 Step 1 — call get_company_employees for "${company}" to see who's there. If that returns nothing useful, fall back to search_people.
 
 Step 2 — from what you find, pick up to 3 people using this priority order:
 1. Anyone in recruiting, HR, talent acquisition, or people ops — roleType: "recruiter". University/campus/early-talent recruiters are highest priority — roleType: "university_recruiter".
-2. A University of Oregon alum (any role) — roleType: "alumni".
+${alumniStep}
 3. An engineer or IC in a role similar to "${jobTitle}" who could give a referral — roleType: "engineer".
 
 For small companies with no dedicated recruiter, the hiring manager, a senior engineer, or even a founder is a valid pick — anyone who would plausibly see or pass along a resume.

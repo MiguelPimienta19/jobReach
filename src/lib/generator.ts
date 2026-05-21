@@ -2,8 +2,9 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { JobPosting, Contact } from '../types.js';
+import type { JobPosting, Contact, RoleType } from '../types.js';
 import { recordTokens } from './tokenLog.js';
+import { loadProfile } from './profile.js';
 
 interface ResultMessage {
   type: 'result';
@@ -26,20 +27,28 @@ interface ParsedJobDetails {
 // ============================================================================
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const contextPath = join(__dirname, '../../context/me.md');
-const contextExists = existsSync(contextPath);
+const CONTEXT_FILES = ['me.md', 'resume.md', 'writing-samples.md', 'targets.md'];
 
-if (!contextExists) {
-  console.warn('\n⚠  context/me.md not found — using built-in fallback bio. Create context/me.md for better results.\n');
+function loadContext(): string {
+  const base = join(__dirname, '../../context');
+
+  return CONTEXT_FILES
+    .filter(f => existsSync(join(base, f)))
+    .map(f => readFileSync(join(base, f), 'utf-8'))
+    .join('\n\n---\n\n');
 }
 
-const contextFile = contextExists ? readFileSync(contextPath, 'utf-8') : '';
+const contextFile = loadContext();
+
+if (!contextFile.trim()) {
+  console.warn('\n[jobreach] No context files found in context/ — using built-in generic fallback bio.\n            Copy context/*.example.md to context/*.md and edit to personalize.\n');
+}
 
 const MY_BACKGROUND = `You are helping with a job search. Write in first person as the applicant.
 
-${contextFile || `The applicant is Miguel Pimienta, a senior CS + Data Science student at University of Oregon graduating June 2026. Projects: Steward (1st place CMU NexHacks, privacy AI), AgDash (production dashboard for Papé Group), TechPrep (AI interview coach, MLH award). Stack: TypeScript, React, Node.js, Supabase, Python.`}
+${contextFile || `The applicant has not yet configured their background. Write professional, generic content. Do not invent specific projects, employers, or experiences. In the output, briefly note that the user should add details to context/me.md to get personalized generation.`}
 
-Write in a genuine, confident voice. No filler phrases. No corporate-speak. Sound like a sharp student, not a resume bot.`;
+Write in a genuine, confident voice. No filler phrases. No corporate-speak. Sound like a sharp candidate, not a resume bot.`;
 
 // ============================================================================
 // Internal Generator
@@ -149,14 +158,16 @@ ${rawText.slice(0, 4000)}`, 'extract');
 // ============================================================================
 
 export async function generateCoverLetter(job: JobPosting): Promise<string> {
-  return generate(`Write a cover letter for Miguel applying to ${job.title} at ${job.company}.
+  const profile = loadProfile();
+
+  return generate(`Write a cover letter for ${profile.name} applying to ${job.title} at ${job.company}.
 
 Output ONLY the cover letter text — no intro, no "Here's the cover letter:", no word count, no markdown headers, no "---" separators. Just the letter itself, ready to copy-paste.
 
 Rules:
 - Under 350 words
 - Lead with something punchy and specific — not "I am writing to express my interest"
-- Highlight the 1-2 most relevant projects from Miguel's background
+- Highlight the 1-2 most relevant projects from ${profile.name}'s background
 - Be specific about WHY this company/role, not generic enthusiasm
 - End with confidence, not desperation
 
@@ -170,19 +181,35 @@ Requirements: ${job.requirements ?? 'Not listed'}`, 'coverLetter');
 // Connection Note Generation
 // ============================================================================
 
-const ROLE_CONTEXT: Record<Contact['roleType'], string> = {
-  recruiter: "This is a recruiter or talent acquisition person. Keep it to one short paragraph. Name the specific role Miguel applied to. Make it effortless for them to act — they get a lot of these.",
-  university_recruiter: "This is a university recruiter or early talent person. They specifically hire new grads — this is their whole job. Lead with Miguel graduating June 2026, mention the strongest project in one sentence, and make it very easy for them to respond. These people want to find good new grads, so be direct about that.",
-  alumni: "This is a University of Oregon alum at the company. Open with the shared UO background (one short clause — not gushing). Mention Miguel applied for the specific role. Ask for a quick chat or, if they're open to it, a referral to the hiring team. Warm tone, not a sales pitch. They are NOT a recruiter — don't ask them to act on a req.",
-  engineer: "This is an engineer/IC on or near the team behind the role. Goal is a referral. Lead with one specific, relevant project of Miguel's that maps to what they likely work on (pick from his background). Ask if they'd be open to referring him — make it easy to say yes. Do NOT pitch the company back to them. They get referral bonuses, so the ask is fine if it's specific and quick to act on.",
-};
+function roleContextFor(roleType: RoleType): string {
+  const profile = loadProfile();
+  const gradClause = profile.gradMonth ? `Lead with ${profile.name} graduating ${profile.gradMonth}` : `Lead with what makes ${profile.name} a strong candidate`;
+  const newGradFraming = profile.gradMonth
+    ? `They specifically hire new grads — this is their whole job. ${gradClause}, mention the strongest project in one sentence, and make it very easy for them to respond. These people want to find good new grads, so be direct about that.`
+    : `They run early-career and experienced-hire pipelines. ${gradClause}, mention the strongest project in one sentence, and make it very easy for them to respond. Be direct about the role and why ${profile.name} is a fit.`;
+
+  const alumniContext = profile.school
+    ? `This is a ${profile.school} alum at the company. Open with the shared ${profile.schoolShort ?? profile.school} background (one short clause — not gushing). Mention ${profile.name} applied for the specific role. Ask for a quick chat or, if they're open to it, a referral to the hiring team. Warm tone, not a sales pitch. They are NOT a recruiter — don't ask them to act on a req.`
+    : `This is someone with a shared background at the company. Open with the shared thread (one short clause — not gushing). Mention ${profile.name} applied for the specific role. Ask for a quick chat or, if they're open to it, a referral to the hiring team. Warm tone, not a sales pitch.`;
+
+  const map: Record<RoleType, string> = {
+    recruiter: `This is a recruiter or talent acquisition person. Keep it to one short paragraph. Name the specific role ${profile.name} applied to. Make it effortless for them to act — they get a lot of these.`,
+    university_recruiter: `This is a university recruiter or early talent person. ${newGradFraming}`,
+    alumni: alumniContext,
+    engineer: `This is an engineer/IC on or near the team behind the role. Goal is a referral. Lead with one specific, relevant project of ${profile.name}'s that maps to what they likely work on (pick from their background). Ask if they'd be open to referring them — make it easy to say yes. Do NOT pitch the company back to them. They get referral bonuses, so the ask is fine if it's specific and quick to act on.`,
+  };
+
+  return map[roleType];
+}
 
 export async function generateConnectionNote(job: JobPosting, contact: Contact): Promise<string> {
-  const note = await generate(`Write a LinkedIn CONNECTION REQUEST NOTE from Miguel to ${contact.name} (${contact.title} at ${contact.company}).
+  const profile = loadProfile();
+
+  const note = await generate(`Write a LinkedIn CONNECTION REQUEST NOTE from ${profile.name} to ${contact.name} (${contact.title} at ${contact.company}).
 
 Output ONLY the note text — nothing else. Ready to paste.
 
-Context: ${ROLE_CONTEXT[contact.roleType]}
+Context: ${roleContextFor(contact.roleType)}
 Job applied for: ${job.title} at ${job.company}
 
 Rules:
@@ -200,7 +227,9 @@ Rules:
 // ============================================================================
 
 export async function answerApplicationQuestion(job: JobPosting, question: string): Promise<string> {
-  return generate(`Answer this application question for Miguel applying to ${job.title} at ${job.company}.
+  const profile = loadProfile();
+
+  return generate(`Answer this application question for ${profile.name} applying to ${job.title} at ${job.company}.
 
 Output ONLY the answer — no intro, no "Here's my answer:", no meta-commentary. Just the response text, ready to paste.
 
@@ -211,8 +240,8 @@ ${job.description}
 ${job.requirements ? `\nRequirements: ${job.requirements}` : ''}
 
 Rules:
-- Write in first person as Miguel
-- Be specific — reference real projects or experiences from his background where relevant
+- Write in first person as ${profile.name}
+- Be specific — reference real projects or experiences from their background where relevant
 - Genuine and reflective, not corporate
 - 150–250 words unless the question clearly calls for something shorter
 - Do NOT start with "I" — vary the opening`, 'qa');

@@ -31,6 +31,14 @@ The Agent SDK (`@anthropic-ai/claude-agent-sdk`) uses the user's Claude Code sub
 
 The `connect` command and `add --connect` both shell out to the **`linkedin-scraper-mcp`** MCP server, launched as `uv tool run linkedin-scraper-mcp`. `uv` must be installed and the tool available, or LinkedIn actions will fail. The same MCP server is also used by `findPeopleAtCompany` for contact discovery.
 
+### Personalization config
+
+Two layers, both git-ignored, both with committed `.example` templates:
+- `jobreach.config.json` — identity (`name`, `school`, `schoolShort`, `gradMonth`). Loaded by `src/lib/profile.ts` with `loadProfile()`. Missing or unparseable → warning + generic defaults (`name = "the applicant"`, no school, no gradMonth); the tool still runs end-to-end.
+- `context/*.md` — long-form background (`me.md`, `resume.md`, `writing-samples.md`, `targets.md`), concatenated into the generator's system prompt. Missing all four → warning + generic stub bio.
+
+Partial config is supported: if `school` is undefined, `agent.ts` swaps the alumni search slot for a generalist recruiter search; if `gradMonth` is undefined, the university-recruiter framing drops new-grad language.
+
 ## Architecture
 
 CLI entrypoint `src/index.ts` registers four commands. Each command drives a multi-step async pipeline displayed via `ora` spinners.
@@ -66,14 +74,19 @@ Sends LinkedIn connection requests for a previously tracked job. Interactive job
 Both use `query()` from `@anthropic-ai/claude-agent-sdk`, but differently:
 
 - **`agent.ts`** — multi-turn agentic loop (`maxTurns: 10`) with the `linkedin-scraper-mcp` MCP server attached. Uses `get_company_employees` and `search_people` to find recruiters and university recruiters (max 3). Streams messages from the loop and parses the final JSON array of contacts from the terminal `result` message. Runs with `allowDangerouslySkipPermissions: true` and `permissionMode: 'bypassPermissions'`. Local interfaces: `AgentContentBlock`, `AgentTextBlock`, `RawContactResult`, `ResultMessage`.
-- **`generator.ts`** — single-turn (`maxTurns: 1`), no tools (`allowedTools: []`, `permissionMode: 'dontAsk'`), just text generation. All generation functions share a `MY_BACKGROUND` system prompt that reads from `context/me.md` at module load (with a hardcoded fallback bio if the file is missing). Local interfaces: `ResultMessage`, `ParsedJobDetails`. **Currently only loads `context/me.md`** — `resume.md`, `targets.md`, and `writing-samples.md` are present but not yet wired in (see NEXT_STEPS.md).
+- **`generator.ts`** — single-turn (`maxTurns: 1`), no tools (`allowedTools: []`, `permissionMode: 'dontAsk'`), just text generation. All generation functions share a `MY_BACKGROUND` system prompt built at module load by `loadContext()`, which concatenates `context/me.md`, `context/resume.md`, `context/writing-samples.md`, and `context/targets.md` (whichever exist). Each generation call also pulls `loadProfile()` from `src/lib/profile.ts` to template `${profile.name}` / `${profile.school}` / `${profile.gradMonth}` into the per-call prompt. Local interfaces: `ResultMessage`, `ParsedJobDetails`.
 - **`linkedin.ts`** — uses `query()` to drive the LinkedIn MCP's `connect_with_person` tool, sending a connection request with a specific note. Runs per-contact with progress streamed through `ora` spinners. Local interfaces: `ContentBlock`, `TextContent`, `ResultMessage`.
 
 ### Personalization context (`context/`)
 
-The `context/` directory holds personal background that the generator reads at runtime:
-- `me.md` — bio injected into the system prompt for all `generator.ts` calls. **The canonical place to edit personality, background, tone.** Don't edit the fallback string in `generator.ts`.
-- `resume.md`, `targets.md`, `writing-samples.md` — **exist but are not yet loaded by code.** The planned change is a `loadContext()` function in `generator.ts` that concatenates all four files. Until that change is made, only `me.md` is active.
+The `context/` directory holds personal background that the generator reads at runtime. All four files are concatenated by `loadContext()` in `generator.ts` and injected into the system prompt. Each is independently optional — if a file is missing it's skipped; if all four are missing the tool warns and uses a generic stub.
+
+- `me.md` — bio, voice rules, writing style. The canonical voice anchor.
+- `resume.md` — bullets, metrics, dates, stacks.
+- `writing-samples.md` — real cover letters and connection notes for tone calibration.
+- `targets.md` — role/company preferences.
+
+`.example.md` siblings for each ship in the repo as templates. The real files are git-ignored.
 
 ### Code style
 

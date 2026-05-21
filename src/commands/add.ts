@@ -7,6 +7,7 @@ import { sendConnections } from '../lib/linkedin.js';
 import { findPeopleAtCompany } from '../lib/agent.js';
 import { saveJob, saveContact, getJobByUrl } from '../lib/supabase.js';
 import { resetTokenLog, tokenSummary } from '../lib/tokenLog.js';
+import { loadProfile } from '../lib/profile.js';
 import type { Contact, JobPosting } from '../types.js';
 
 // ============================================================================
@@ -154,8 +155,11 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
     console.log(chalk.yellow("\n  Couldn't find specific people at this company."));
     console.log(chalk.gray("  LinkedIn blocks most automated discovery. You'll need to search manually this time."));
   } else {
+    const profile = loadProfile();
+    const alumniLabel = profile.schoolShort ? `${profile.schoolShort} Alum` : 'Alum';
+
     contacts.forEach((contact, i) => {
-      const roleLabel = ({ recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter'), alumni: chalk.cyan('UO Alum'), engineer: chalk.yellow('Engineer (Referral)') }[contact.roleType]) ?? chalk.dim(contact.roleType);
+      const roleLabel = ({ recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter'), alumni: chalk.cyan(alumniLabel), engineer: chalk.yellow('Engineer (Referral)') }[contact.roleType]) ?? chalk.dim(contact.roleType);
       console.log(`\n  ${chalk.bold(`${i + 1}. ${contact.name}`)}  ·  ${contact.title}  [${roleLabel}]`);
       if (contact.linkedinUrl) {
         console.log(`     ${chalk.cyan.underline(contact.linkedinUrl)}`);

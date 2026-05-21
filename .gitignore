@@ -2,7 +2,9 @@ node_modules/
 dist/
 .env
 *.js.map
-context/
+context/*.md
+!context/*.example.md
+jobreach.config.json
 NEXT_STEPS.md
 .claude
 supabase/.temp

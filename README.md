@@ -67,17 +67,42 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_your_key_here
 ```
 
-### 3. Initialize the database
+### 3. Personalize the output (two layers)
+
+There are two layers of personalization, both git-ignored. The repo ships `.example` templates for each — copy them, then edit.
+
+**Layer 1 — identity (small, structured):**
+
+```bash
+cp jobreach.config.example.json jobreach.config.json
+```
+
+Open `jobreach.config.json` and fill in your first name, school (if you're a student), and grad month. If you're not a student, remove the `school` and `gradMonth` lines — the tool drops the new-grad framing and the alumni-search slot becomes a generalist recruiter search.
+
+**Layer 2 — voice and background (long-form):**
+
+```bash
+cp context/me.example.md           context/me.md
+cp context/resume.example.md       context/resume.md
+cp context/writing-samples.example.md context/writing-samples.md
+cp context/targets.example.md      context/targets.md
+```
+
+Edit each file in place. All four are read at startup and concatenated into the system prompt for every generation. You can skip any of them — the tool just loads what's present. If you skip all four, you'll get a one-line warning and generic output.
+
+The most important file is `context/me.md` — it sets the voice rules the AI follows (no em-dashes, no semicolons, short sentences, plain facts) plus your bio and projects.
+
+### 4. Initialize the database
 
 In your Supabase dashboard, open the **SQL Editor** and run the contents of [`supabase/schema.sql`](supabase/schema.sql). This creates three tables (`jobs`, `contacts`, `messages`) with the right indexes and triggers.
 
-### 4. Install the LinkedIn MCP server
+### 5. Install the LinkedIn MCP server
 
 ```bash
 uv tool install linkedin-scraper-mcp
 ```
 
-### 5. Log in to LinkedIn
+### 6. Log in to LinkedIn
 
 ```bash
 uv tool run linkedin-scraper-mcp --login
@@ -85,13 +110,13 @@ uv tool run linkedin-scraper-mcp --login
 
 This opens a browser for you to log in. Your session is saved locally and reused on subsequent runs. The LinkedIn scraper is what lets the tool find recruiters — skip this step and contact discovery will be skipped.
 
-### 6. Build
+### 7. Build
 
 ```bash
 npm run build
 ```
 
-### 7. Link globally
+### 8. Link globally
 
 ```bash
 npm link
@@ -141,37 +166,21 @@ The job must already exist in Supabase (added via `jobreach add`). The answer is
 
 ---
 
-## Personalizing output with `context/me.md`
+## Personalizing output
 
-All generated text — cover letters, connection notes, application answers — is grounded in your background. By default, the tool falls back to a hardcoded stub. To use your own information, create `context/me.md` (this file is git-ignored):
+All generated text — cover letters, connection notes, application answers — is grounded in two layers of personal config, both git-ignored:
 
-```
-context/
-└── me.md   ← create this, it's git-ignored
-```
+| File | Purpose |
+|---|---|
+| `jobreach.config.json` | Identity: name, school, grad month. Templated into every prompt. |
+| `context/me.md` | Bio, voice rules, writing style. The canonical voice anchor. |
+| `context/resume.md` | Specific bullets, metrics, dates, stacks. |
+| `context/writing-samples.md` | Real cover letters and connection notes for tone calibration. |
+| `context/targets.md` | What kinds of roles and companies you want. |
 
-Suggested structure:
+Each ships as a `.example` template in the repo. Copy and edit (see Setup step 3). Files are read at startup — no rebuild needed after editing.
 
-```markdown
-# About me
-
-[2-3 sentences: name, school/company, graduation date or years of experience]
-
-# Projects
-
-**Project Name** — [one sentence: what it is, what it won or achieved]
-**Project Name** — [one sentence]
-
-# Stack
-
-[comma-separated list of languages, frameworks, tools]
-
-# Writing voice
-
-[optional: describe how you write — e.g. "direct and confident, no filler phrases, not overly formal"]
-```
-
-The file is read at startup. No re-build needed after editing it.
+If `jobreach.config.json` is missing the tool warns and falls back to generic placeholders. If all `context/*.md` files are missing the tool warns and generates with a generic stub bio. Partial config is fine: drop `school` or `gradMonth` from the config to disable alumni-search and new-grad framing respectively.
 
 ---
 
