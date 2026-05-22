@@ -25,7 +25,24 @@ interface RawConfig {
 // ============================================================================
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = join(__dirname, '../../jobreach.config.json');
+
+// Path differs between dev (src/lib/) and built (dist/). Probe both.
+function findConfigPath(): string {
+  const candidates = [
+    join(__dirname, '../jobreach.config.json'),
+    join(__dirname, '../../jobreach.config.json'),
+  ];
+
+  for (const c of candidates) {
+    if (existsSync(c)) {
+      return c;
+    }
+  }
+
+  return candidates[1];
+}
+
+const CONFIG_PATH = findConfigPath();
 
 let cached: UserProfile | null = null;
 

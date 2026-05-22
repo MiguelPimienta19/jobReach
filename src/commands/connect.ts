@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { select, confirm } from '@inquirer/prompts';
 import { listJobs, getContactsForJob, updateConnectionNote } from '../lib/supabase.js';
-import { generateConnectionNote } from '../lib/generator.js';
+import { generateConnectionNotesBatch } from '../lib/generator.js';
 import { sendConnections, jitterBetweenSends } from '../lib/linkedin.js';
 import type { JobPosting, Contact } from '../types.js';
 
@@ -43,28 +43,32 @@ export const connectCommand = new Command('connect')
     // Regen notes if requested, then save them back
     if (opts.regen) {
       const regenSpinner = ora('Regenerating connection notes...').start();
-      await Promise.all(withUrls.map(async c => {
-        const jobPosting: JobPosting = {
-          id: job.id,
-          url: job.url,
-          company: job.company,
-          title: job.title,
-          description: '',
-          status: 'pending',
-        };
-        const contactObj: Contact = {
-          name: c.name,
-          title: c.title,
-          linkedinUrl: c.linkedinUrl,
-          company: job.company,
-          roleType: c.roleType as ConnectionRoleType,
-        };
-        const note = await generateConnectionNote(jobPosting, contactObj).catch(() => '');
+      const jobPosting: JobPosting = {
+        id: job.id,
+        url: job.url,
+        company: job.company,
+        title: job.title,
+        description: '',
+        status: 'pending',
+      };
+      const contactObjs: Contact[] = withUrls.map(c => ({
+        name: c.name,
+        title: c.title,
+        linkedinUrl: c.linkedinUrl,
+        company: job.company,
+        roleType: c.roleType as ConnectionRoleType,
+      }));
+
+      const notes = await generateConnectionNotesBatch(jobPosting, contactObjs).catch(() => [] as string[]);
+
+      await Promise.all(withUrls.map(async (c, i) => {
+        const note = notes[i] ?? '';
         if (note) {
           c.connectionNote = note;
           await updateConnectionNote(c.contactId, note).catch(() => {});
         }
       }));
+
       regenSpinner.succeed('Notes regenerated');
     }
 

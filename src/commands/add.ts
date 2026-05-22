@@ -2,9 +2,10 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { scrapeJobPosting } from '../lib/scraper.js';
-import { extractJobDetails, generateCoverLetter, generateConnectionNote } from '../lib/generator.js';
+import { extractJobDetails, generateCoverLetter, generateConnectionNotesBatch } from '../lib/generator.js';
 import { sendConnections } from '../lib/linkedin.js';
 import { findPeopleAtCompany } from '../lib/agent.js';
+import { closeLinkedinMcp } from '../lib/linkedinMcp.js';
 import { saveJob, saveContact, getJobByUrl } from '../lib/supabase.js';
 import { resetTokenLog, tokenSummary } from '../lib/tokenLog.js';
 import { loadProfile } from '../lib/profile.js';
@@ -73,14 +74,14 @@ export const addCommand = new Command('add')
       parallelSpinner.warn(`Parallel step error (continuing): ${e}`);
     }
 
-    // Generate connection notes in parallel
+    // Generate connection notes in a single batched call
     if (contacts.length > 0) {
       const msgSpinner = ora('Generating connection notes...').start();
-      await Promise.all(contacts.map(async contact => {
-        const jobPosting = { ...job, coverLetter, status: 'pending' as const };
-        const note = await generateConnectionNote(jobPosting, contact).catch(() => '');
-        contact.connectionNote = note;
-      }));
+      const jobPosting = { ...job, coverLetter, status: 'pending' as const };
+      const notes = await generateConnectionNotesBatch(jobPosting, contacts).catch(() => [] as string[]);
+      contacts.forEach((contact, i) => {
+        contact.connectionNote = notes[i] ?? '';
+      });
       msgSpinner.succeed('Connection notes ready');
     }
 
@@ -119,8 +120,15 @@ export const addCommand = new Command('add')
         }
 
         const jobPosting = { ...job, coverLetter, status: 'pending' as const };
+        // sendConnections owns its own MCP-client teardown.
         await sendConnections(jobPosting, withUrls);
+      } else {
+        await closeLinkedinMcp();
       }
+    } else {
+      // findPeopleAtCompany opens the persistent MCP client; close it here so
+      // the CLI exits cleanly when the user didn't pass --connect.
+      await closeLinkedinMcp();
     }
   });
 

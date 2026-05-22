@@ -6,5 +6,7 @@ context/*.md
 !context/*.example.md
 jobreach.config.json
 NEXT_STEPS.md
+NOTES.md
 .claude
 supabase/.temp
+CLAUDE.md

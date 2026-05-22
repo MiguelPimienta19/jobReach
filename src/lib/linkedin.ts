@@ -1,32 +1,8 @@
 import chalk from 'chalk';
 import ora from 'ora';
-import { query } from '@anthropic-ai/claude-agent-sdk';
 import { generateConnectionNote } from './generator.js';
+import { connectWithPerson, closeLinkedinMcp } from './linkedinMcp.js';
 import type { JobPosting, Contact } from '../types.js';
-
-// ============================================================================
-// Local Interfaces
-// ============================================================================
-
-interface ContentBlock {
-  type: string;
-}
-
-interface TextContent {
-  type: string;
-  text: string;
-}
-
-interface ResultMessage {
-  type: 'result';
-  subtype: string;
-}
-
-// ============================================================================
-// Config
-// ============================================================================
-
-const LINKEDIN_MCP = { type: 'stdio' as const, command: 'uv', args: ['tool', 'run', 'linkedin-scraper-mcp'] };
 
 // ============================================================================
 // Timing Utilities
@@ -49,28 +25,15 @@ export async function jitterBetweenSends(): Promise<void> {
 // Connection Requests
 // ============================================================================
 
-async function sendOneRequest(linkedinUrl: string, note: string, onProgress?: (msg: string) => void): Promise<boolean> {
-  for await (const message of query({
-    prompt: `Use connect_with_person to send a connection request to ${linkedinUrl} with this exact note: "${note}"`,
-    options: { mcpServers: { linkedin: LINKEDIN_MCP }, allowDangerouslySkipPermissions: true, permissionMode: 'bypassPermissions', maxTurns: 2, settingSources: [] },
-  })) {
-    if (message.type === 'assistant') {
-      const text = message.message.content.find((b: ContentBlock) => b.type === 'text') as TextContent | undefined;
-
-      if (text?.text.trim()) {
-        onProgress?.(text.text.slice(0, 80).replace(/\n/g, ' '));
-      }
-    } else if (message.type === 'result') {
-      return (message as ResultMessage).subtype === 'success';
-    }
-  }
-
-  return false;
-}
+// Status values returned by linkedin-scraper-mcp's connect_with_person tool that
+// indicate the request was successfully sent or already complete.
+const SUCCESS_STATUSES = new Set(['connected', 'accepted', 'pending', 'already_connected']);
 
 export interface SendResult {
   contact: Contact;
   success: boolean;
+  status?: string;
+  message?: string;
 }
 
 export async function sendConnections(job: JobPosting, contacts: Contact[]): Promise<SendResult[]> {
@@ -79,36 +42,48 @@ export async function sendConnections(job: JobPosting, contacts: Contact[]): Pro
   const results: SendResult[] = [];
   let attempted = false;
 
-  for (const contact of contacts) {
-    if (!contact.linkedinUrl) {
-      continue;
+  try {
+    for (const contact of contacts) {
+      if (!contact.linkedinUrl) {
+        continue;
+      }
+
+      if (attempted) {
+        await jitterBetweenSends();
+      }
+
+      const spinner = ora(`${contact.name}...`).start();
+      const note = contact.connectionNote || await generateConnectionNote(job, contact).catch(() => '');
+
+      if (!note) {
+        spinner.warn(`${contact.name} — skipped (no connection note)`);
+        results.push({ contact, success: false, status: 'no_note' });
+        continue;
+      }
+
+      attempted = true;
+      spinner.text = `${contact.name} — sending...`;
+
+      let outcome;
+      try {
+        outcome = await connectWithPerson(contact.linkedinUrl, note);
+      } catch (e) {
+        outcome = { status: 'send_failed', message: e instanceof Error ? e.message : String(e) };
+      }
+
+      const success = SUCCESS_STATUSES.has(outcome.status);
+
+      if (success) {
+        spinner.succeed(chalk.green(`${contact.name} — ${outcome.status}`));
+      } else {
+        spinner.fail(chalk.red(`${contact.name} — ${outcome.status}${outcome.message ? `: ${outcome.message}` : ''}`));
+      }
+
+      results.push({ contact, success, status: outcome.status, message: outcome.message });
     }
-
-    if (attempted) {
-      await jitterBetweenSends();
-    }
-
-    const spinner = ora(`${contact.name}...`).start();
-    const note = contact.connectionNote || await generateConnectionNote(job, contact).catch(() => '');
-
-    if (!note) {
-      spinner.warn(`${contact.name} — skipped (no connection note)`);
-      results.push({ contact, success: false });
-      continue;
-    }
-
-    attempted = true;
-    spinner.text = `${contact.name} — sending...`;
-
-    const ok = await sendOneRequest(contact.linkedinUrl, note, msg => { spinner.text = chalk.dim(msg); });
-
-    if (ok) {
-      spinner.succeed(chalk.green(`${contact.name} — request sent`));
-    } else {
-      spinner.fail(chalk.red(`${contact.name} — failed`));
-    }
-
-    results.push({ contact, success: ok });
+  } finally {
+    // Tear down the MCP child process so the CLI can exit cleanly.
+    await closeLinkedinMcp();
   }
 
   console.log();

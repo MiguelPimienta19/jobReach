@@ -6,11 +6,20 @@ import type { JobPosting, Contact, RoleType } from '../types.js';
 import { recordTokens } from './tokenLog.js';
 import { loadProfile } from './profile.js';
 
+interface ResultUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
 interface ResultMessage {
   type: 'result';
   subtype: string;
   result?: string;
   errors?: string[];
+  usage?: ResultUsage;
+  total_cost_usd?: number;
 }
 
 interface ParsedJobDetails {
@@ -29,8 +38,25 @@ interface ParsedJobDetails {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_FILES = ['me.md', 'resume.md', 'writing-samples.md', 'targets.md'];
 
+// Path differs between dev (src/lib/) and built (dist/). Probe both so the
+// globally-linked binary still finds context files.
+function findContextDir(): string {
+  const candidates = [
+    join(__dirname, '../context'),
+    join(__dirname, '../../context'),
+  ];
+
+  for (const c of candidates) {
+    if (existsSync(c)) {
+      return c;
+    }
+  }
+
+  return candidates[1];
+}
+
 function loadContext(): string {
-  const base = join(__dirname, '../../context');
+  const base = findContextDir();
 
   return CONTEXT_FILES
     .filter(f => existsSync(join(base, f)))
@@ -44,6 +70,11 @@ if (!contextFile.trim()) {
   console.warn('\n[jobreach] No context files found in context/ — using built-in generic fallback bio.\n            Copy context/*.example.md to context/*.md and edit to personalize.\n');
 }
 
+// Single shared system prompt: extract acts as a cache pre-warmer for the
+// writers below. We tried per-call slicing (me+writing-samples for the
+// cover/notes path, me+resume for qa, minimal prompt for extract) and total
+// per-run cost went UP, because the slices broke cache sharing across calls
+// — see the comment block on the writer functions for the measured numbers.
 const MY_BACKGROUND = `You are helping with a job search. Write in first person as the applicant.
 
 ${contextFile || `The applicant has not yet configured their background. Write professional, generic content. Do not invent specific projects, employers, or experiences. In the output, briefly note that the user should add details to context/me.md to get personalized generation.`}
@@ -54,22 +85,7 @@ Write in a genuine, confident voice. No filler phrases. No corporate-speak. Soun
 // Internal Generator
 // ============================================================================
 
-function usageFrom(message: unknown): { input: number; output: number; cacheRead: number; cacheWrite: number } | null {
-  if (!message || typeof message !== 'object') { return null; }
-  const m = message as Record<string, unknown>;
-  const inner = ((m.message as Record<string, unknown> | undefined)?.usage ?? m.usage) as Record<string, number> | undefined;
-  if (!inner || typeof inner !== 'object') { return null; }
-  return {
-    input: (inner.input_tokens as number) ?? 0,
-    output: (inner.output_tokens as number) ?? 0,
-    cacheRead: (inner.cache_read_input_tokens as number) ?? 0,
-    cacheWrite: (inner.cache_creation_input_tokens as number) ?? 0,
-  };
-}
-
 async function generate(prompt: string, stepName = 'generate'): Promise<string> {
-  let inputTokens = 0, outputTokens = 0, cacheRead = 0, cacheWrite = 0;
-
   for await (const message of query({
     prompt,
     options: {
@@ -81,17 +97,18 @@ async function generate(prompt: string, stepName = 'generate'): Promise<string> 
       settingSources: [],
     },
   })) {
-    if (message.type === 'assistant') {
-      const usage = usageFrom(message);
-      if (usage) {
-        inputTokens += usage.input;
-        outputTokens += usage.output;
-        cacheRead += usage.cacheRead;
-        cacheWrite += usage.cacheWrite;
-      }
-    } else if (message.type === 'result') {
-      recordTokens(stepName, inputTokens, outputTokens, cacheRead, cacheWrite);
+    if (message.type === 'result') {
       const r = message as ResultMessage;
+      const u = r.usage ?? {};
+
+      recordTokens(
+        stepName,
+        u.input_tokens ?? 0,
+        u.output_tokens ?? 0,
+        u.cache_read_input_tokens ?? 0,
+        u.cache_creation_input_tokens ?? 0,
+        r.total_cost_usd ?? 0,
+      );
 
       if (r.subtype === 'success') {
         return (r.result ?? '').trim();
@@ -108,6 +125,16 @@ async function generate(prompt: string, stepName = 'generate'): Promise<string> 
 // Job Extraction
 // ============================================================================
 
+// Uses the same MY_BACKGROUND system prompt as the writers (not a custom one).
+// Empirically the SDK injects ~13K of base context per call regardless; sharing
+// the voice prefix means call 1 pre-warms a cache that calls 2-4 read, instead
+// of writing two separate cache prefixes.
+//
+// Measured tradeoff (May 2026, scripts/measure-tokens.ts with real context/*.md):
+//   shared MY_BACKGROUND for all 4 calls .................. $0.2699
+//   sliced (extract=minimal, cover=me+ws, qa=me+resume) ... $0.2901
+// Slicing broke the cache that writers were reading from extract, so each
+// writer paid its own cache-write cost. Keeping the shared prompt is cheaper.
 export async function extractJobDetails(rawText: string, url: string): Promise<Omit<JobPosting, 'id' | 'status' | 'coverLetter'>> {
   const result = await generate(`Extract structured job posting info from this text. Return ONLY a JSON object:
 {
@@ -220,6 +247,64 @@ Rules:
 - Don't start with "Hi" as the literal first word`, 'connectionNote');
 
   return note.slice(0, 280);
+}
+
+// Batched variant — writes a note for every contact in a single LLM call, so
+// the voice system prompt is sent (and cached) once instead of N times.
+export async function generateConnectionNotesBatch(job: JobPosting, contacts: Contact[]): Promise<string[]> {
+  if (contacts.length === 0) {
+    return [];
+  }
+
+  if (contacts.length === 1) {
+    const note = await generateConnectionNote(job, contacts[0]);
+    return [note];
+  }
+
+  const profile = loadProfile();
+
+  const contactBlocks = contacts
+    .map((c, i) => `Contact ${i + 1}:
+  name: ${c.name}
+  title: ${c.title} at ${c.company}
+  context: ${roleContextFor(c.roleType)}`)
+    .join('\n\n');
+
+  const raw = await generate(`Write LinkedIn CONNECTION REQUEST NOTES from ${profile.name}, one per contact below, all for the same job application: ${job.title} at ${job.company}.
+
+${contactBlocks}
+
+Output ONLY a JSON array of strings in the same order as the contacts, no preamble:
+["note for contact 1", "note for contact 2", ...]
+
+Rules per note:
+- HARD LIMIT: 280 characters total per note
+- One short paragraph, no line breaks
+- Mention the specific role
+- Natural and direct — not a cover letter
+- Don't start with "Hi" as the literal first word
+- Tailor each to the contact's role context above`, 'connectionNotesBatch');
+
+  const match = raw.match(/\[[\s\S]*\]/);
+
+  if (!match) {
+    // Fall back to per-contact calls if the batch response is malformed
+    return Promise.all(contacts.map(c => generateConnectionNote(job, c)));
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return Promise.all(contacts.map(c => generateConnectionNote(job, c)));
+  }
+
+  if (!Array.isArray(parsed) || parsed.length !== contacts.length || !parsed.every(n => typeof n === 'string')) {
+    return Promise.all(contacts.map(c => generateConnectionNote(job, c)));
+  }
+
+  return (parsed as string[]).map(n => n.slice(0, 280));
 }
 
 // ============================================================================

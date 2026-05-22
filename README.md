@@ -11,7 +11,7 @@ jobreach add <url>
 1. **Scrape** — Playwright fetches the job posting (handles JS-rendered pages)
 2. **Parse** — Claude extracts title, company, description, requirements, location
 3. **Cover letter** — Claude writes a targeted cover letter in your voice
-4. **Recruiter search** — A Claude agent uses the LinkedIn MCP server to find recruiters and university recruiters at the company (runs in parallel with cover letter generation)
+4. **Recruiter search** — The tool calls the LinkedIn MCP server directly to list employees, then a single Claude call ranks the candidates and picks up to 3 contacts (recruiter, alum, engineer). Runs in parallel with cover letter generation.
 5. **Connection notes** — A ≤280-char LinkedIn connection request note generated for each contact (in parallel)
 6. **Persist** — Everything saved to Supabase (deduplicates by URL)
 
@@ -124,6 +124,10 @@ npm link
 
 Now `jobreach` is available anywhere in your terminal.
 
+> **If you edit `context/*.md` or `jobreach.config.json` later**, you don't need to rebuild — they're read at runtime. You only need to rerun `npm run build` if you change TypeScript source.
+
+> **If the tool says "No context files found"** when run globally, you probably haven't rebuilt since pulling. Run `npm run build` once and the linked binary will pick up the latest path resolution.
+
 ---
 
 ## Usage
@@ -215,8 +219,9 @@ Job status can be: `pending` → `applied` → `interview` → `offer` / `reject
 |---|---|
 | `commander` | CLI argument parsing |
 | `playwright` | Headless browser scraping |
-| `@anthropic-ai/claude-agent-sdk` | Drives Claude for generation + LinkedIn agent loop |
-| `linkedin-scraper-mcp` | MCP server the agent uses to search LinkedIn |
+| `@anthropic-ai/claude-agent-sdk` | Drives Claude for cover letter, connection notes, Q&A, and the single ranking call for contact discovery |
+| `@modelcontextprotocol/sdk` | TypeScript MCP client used to call the LinkedIn server directly (no LLM in the loop for scrape / send) |
+| `linkedin-scraper-mcp` | LinkedIn scraper exposed as an MCP server (Python, run via `uv`) |
 | `@supabase/supabase-js` | Persistence |
 | `ora` + `chalk` | Terminal output |
 | `tsup` | Build (ESM output) |
