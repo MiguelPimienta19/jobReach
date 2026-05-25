@@ -1,6 +1,6 @@
 # [Your Name] — Context for jobreach
 
-Bio, voice, and background for every generated cover letter, outreach message, and application answer. The more specific this is, the better the output. Fill in the brackets with your real information and delete this top paragraph when you're done.
+Bio and voice for every generated cover letter, outreach message, and application answer. The more specific this is, the better the output. Fill in the brackets with your real information and delete this top paragraph when you're done.
 
 ---
 
@@ -116,47 +116,3 @@ AVOID:
 - Bullet points, bold, or headers inside cover letters. Plain prose only.
 - Filler softeners ("I believe I could potentially...").
 - Starting any sentence (especially the first) with "I."
-
----
-
-## Writing Rules (enforced in every generation)
-
-### Cover letters
-- Under 350 words
-- Plain text. No headers, no bullets, no bold inside the body.
-- Format (header block then body):
-  - `[Today's date]`
-  - `[Contact Name]` (skip if unknown)
-  - `[Contact Title]` (skip if unknown)
-  - `[Company Name]`
-  - (blank line)
-  - `Dear [Contact Name]:` — or `Dear Hiring Team:` if no name
-  - (blank line)
-  - P1: Who you are + why this company specifically
-  - P2: 1–2 real projects with stack and outcome
-  - P3: Why this role fits where you're going
-  - P4 (optional): One human detail
-  - (blank line)
-  - `Sincerely,`
-  - `[Your Name]`
-- No street address. Redundant with the application form.
-- Open the body with something specific. Never throat-clearing.
-- End with confidence, not desperation.
-
-### Application questions (jobreach qa)
-- 150–250 words unless the question clearly calls for less
-- First person, specific — reference real projects
-- Don't start with "I"
-- Genuine and reflective, not performative
-- No buzzwords
-
-### Connection notes (under 280 chars)
-- Plain, direct, one specific reason for reaching out
-- No "I'd love to connect" filler
-- Mention the specific company, role, or shared school/background
-
----
-
-## What I'm targeting
-
-[A few short lines. Role types, company size, industries you do or don't want. Soft preferences are fine.]

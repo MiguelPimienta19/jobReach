@@ -1,6 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Contact, RoleType } from '../types.js';
-import { recordTokens } from './tokenLog.js';
 import { loadProfile } from './profile.js';
 import { getCompanyEmployees, searchPeople, type EmployeeReference } from './linkedinMcp.js';
 
@@ -13,19 +12,10 @@ interface RankedPick {
   roleType: string;
 }
 
-interface ResultUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-}
-
 interface ResultMessage {
   type: 'result';
   subtype: string;
   result?: string;
-  usage?: ResultUsage;
-  total_cost_usd?: number;
 }
 
 // ============================================================================
@@ -118,8 +108,9 @@ function viableCount(candidates: Candidate[]): number {
 // LLM ranking (single short call, minimal system prompt)
 // ============================================================================
 
-async function rankCandidates(candidates: Candidate[], company: string, jobTitle: string, profile: ReturnType<typeof loadProfile>): Promise<RankedPick[]> {
+async function rankCandidates(candidates: Candidate[], company: string, jobTitle: string, profile: ReturnType<typeof loadProfile>, onProgress?: (msg: string) => void): Promise<RankedPick[]> {
   if (candidates.length === 0) {
+    onProgress?.('rank: no candidates to rank');
     return [];
   }
 
@@ -148,12 +139,13 @@ Output ONLY this JSON array, no preamble:
 [{ "index": <number from list>, "roleType": "recruiter" | "university_recruiter" | "alumni" | "engineer" }]`;
 
   let picks: RankedPick[] = [];
+  let sawResult = false;
 
   for await (const message of query({
     prompt,
     options: {
       systemPrompt: 'Pick the best people from a short candidate list. Output JSON only.',
-      maxTurns: 1,
+      maxTurns: 3,
       allowedTools: [],
       permissionMode: 'dontAsk',
       settingSources: [],
@@ -163,34 +155,36 @@ Output ONLY this JSON array, no preamble:
       continue;
     }
 
-    const r = message as ResultMessage;
-    const u = r.usage ?? {};
+    sawResult = true;
 
-    recordTokens(
-      'linkedin rank',
-      u.input_tokens ?? 0,
-      u.output_tokens ?? 0,
-      u.cache_read_input_tokens ?? 0,
-      u.cache_creation_input_tokens ?? 0,
-      r.total_cost_usd ?? 0,
-    );
+    const r = message as ResultMessage;
 
     if (r.subtype !== 'success' || !r.result) {
+      onProgress?.(`rank: LLM returned non-success subtype "${r.subtype}" (no result text)`);
       break;
     }
 
     const match = r.result.match(/\[[\s\S]*\]/);
 
     if (!match) {
+      onProgress?.(`rank: LLM returned no JSON array. First 120 chars: ${r.result.slice(0, 120).replace(/\s+/g, ' ')}`);
       break;
     }
 
     try {
       const parsed = JSON.parse(match[0]) as RankedPick[];
       picks = parsed.filter(p => typeof p.index === 'number' && typeof p.roleType === 'string').slice(0, 3);
-    } catch {
-      // malformed JSON — bail out, caller handles empty picks
+
+      if (picks.length === 0) {
+        onProgress?.(`rank: LLM returned a JSON array but no valid {index, roleType} entries. Raw: ${match[0].slice(0, 120)}`);
+      }
+    } catch (e) {
+      onProgress?.(`rank: JSON.parse failed: ${e instanceof Error ? e.message : String(e)}. Raw: ${match[0].slice(0, 120)}`);
     }
+  }
+
+  if (!sawResult) {
+    onProgress?.('rank: Agent SDK stream ended without a result message');
   }
 
   return picks;
@@ -259,7 +253,11 @@ export async function findPeopleAtCompany(company: string, jobTitle: string, onP
 
   onProgress?.(`Ranking ${ranked.length} candidates with one LLM call`);
 
-  const picks = await rankCandidates(ranked, company, jobTitle, profile);
+  const picks = await rankCandidates(ranked, company, jobTitle, profile, onProgress);
+
+  if (picks.length === 0) {
+    onProgress?.(`rank: 0 picks returned from slate of ${ranked.length}`);
+  }
 
   const contacts: Contact[] = [];
 
@@ -267,6 +265,7 @@ export async function findPeopleAtCompany(company: string, jobTitle: string, onP
     const c = ranked[pick.index];
 
     if (!c) {
+      onProgress?.(`rank: LLM picked out-of-bounds index ${pick.index} (slate size ${ranked.length})`);
       continue;
     }
 

@@ -3,11 +3,9 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { scrapeJobPosting } from '../lib/scraper.js';
 import { extractJobDetails, generateCoverLetter, generateConnectionNotesBatch } from '../lib/generator.js';
-import { sendConnections } from '../lib/linkedin.js';
 import { findPeopleAtCompany } from '../lib/agent.js';
 import { closeLinkedinMcp } from '../lib/linkedinMcp.js';
 import { saveJob, saveContact, getJobByUrl } from '../lib/supabase.js';
-import { resetTokenLog, tokenSummary } from '../lib/tokenLog.js';
 import { loadProfile } from '../lib/profile.js';
 import type { Contact, JobPosting } from '../types.js';
 
@@ -18,9 +16,7 @@ import type { Contact, JobPosting } from '../types.js';
 export const addCommand = new Command('add')
   .description('Add a job posting and generate a cover letter and connection notes')
   .argument('<url>', 'URL of the job posting')
-  .option('--connect', 'Send LinkedIn connection requests automatically after saving')
-  .action(async (url: string, opts: { connect?: boolean }) => {
-    resetTokenLog();
+  .action(async (url: string) => {
     console.log(chalk.bold.blue('\n  jobreach  —  Personal Job Search Assistant\n'));
 
     // Deduplicate — let DB errors surface rather than silently skipping the check
@@ -63,15 +59,33 @@ export const addCommand = new Command('add')
     const parallelSpinner = ora('Generating cover letter & searching LinkedIn...').start();
     let coverLetter = '';
     let contacts: Contact[] = [];
+    const linkedinTrace: string[] = [];
     try {
       [coverLetter, contacts] = await Promise.all([
         generateCoverLetter(job).catch(e => { parallelSpinner.text = chalk.dim(`Cover letter error: ${e}`); return ''; }),
-        findPeopleAtCompany(job.company, job.title, msg => { parallelSpinner.text = chalk.dim(msg); }).catch(() => [] as Contact[]),
+        findPeopleAtCompany(job.company, job.title, msg => {
+          linkedinTrace.push(msg);
+          parallelSpinner.text = chalk.dim(msg);
+        }).catch(() => [] as Contact[]),
       ]);
       const summary = [coverLetter ? 'Cover letter ready' : null, `${contacts.length} contact${contacts.length !== 1 ? 's' : ''} found`].filter(Boolean).join(' · ');
       parallelSpinner.succeed(summary);
     } catch (e) {
       parallelSpinner.warn(`Parallel step error (continuing): ${e}`);
+    }
+
+    // If LinkedIn discovery returned 0 contacts, surface the diagnostic trace
+    // so the user can see why (rate limit, no JSON, empty slate, etc.).
+    if (contacts.length === 0 && linkedinTrace.length > 0) {
+      const diagnostics = linkedinTrace.filter(m => m.startsWith('rank:') || m.includes('failed'));
+      if (diagnostics.length > 0) {
+        console.log(chalk.dim(`  LinkedIn diagnostics:`));
+        for (const d of diagnostics) {
+          console.log(chalk.dim(`    · ${d}`));
+        }
+      } else {
+        console.log(chalk.dim(`  LinkedIn last step: ${linkedinTrace[linkedinTrace.length - 1]}`));
+      }
     }
 
     // Generate connection notes in a single batched call
@@ -101,35 +115,8 @@ export const addCommand = new Command('add')
 
     printSummary(job, contacts, coverLetter, saved);
 
-    const tokenReport = tokenSummary();
-    if (tokenReport) {
-      console.log(chalk.dim(tokenReport));
-      console.log();
-    }
-
-    if (opts.connect) {
-      const withUrls = contacts.filter(c => c.linkedinUrl);
-      if (withUrls.length > 0) {
-        // Pause between LinkedIn scraping (just happened) and the first connection send,
-        // so the back-to-back scrape→write doesn't look like a velocity spike to LinkedIn.
-        const gapSpinner = ora(chalk.dim('Pausing 15s before sending requests...')).start();
-        try {
-          await new Promise(r => setTimeout(r, 15000));
-        } finally {
-          gapSpinner.stop();
-        }
-
-        const jobPosting = { ...job, coverLetter, status: 'pending' as const };
-        // sendConnections owns its own MCP-client teardown.
-        await sendConnections(jobPosting, withUrls);
-      } else {
-        await closeLinkedinMcp();
-      }
-    } else {
-      // findPeopleAtCompany opens the persistent MCP client; close it here so
-      // the CLI exits cleanly when the user didn't pass --connect.
-      await closeLinkedinMcp();
-    }
+    // findPeopleAtCompany opens the persistent MCP client; close it so the CLI exits cleanly.
+    await closeLinkedinMcp();
   });
 
 // ============================================================================

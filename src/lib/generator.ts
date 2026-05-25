@@ -3,23 +3,14 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { JobPosting, Contact, RoleType } from '../types.js';
-import { recordTokens } from './tokenLog.js';
 import { loadProfile } from './profile.js';
-
-interface ResultUsage {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-}
+import { findProjectRoot } from './projectRoot.js';
 
 interface ResultMessage {
   type: 'result';
   subtype: string;
   result?: string;
   errors?: string[];
-  usage?: ResultUsage;
-  total_cost_usd?: number;
 }
 
 interface ParsedJobDetails {
@@ -38,21 +29,30 @@ interface ParsedJobDetails {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTEXT_FILES = ['me.md', 'resume.md', 'writing-samples.md', 'targets.md'];
 
-// Path differs between dev (src/lib/) and built (dist/). Probe both so the
-// globally-linked binary still finds context files.
+// Path differs between dev (src/lib/) and built (dist/). Also handles the
+// `npm install -g .` case where context/me.md (git-ignored) isn't in the
+// install dir — walks up from CWD or honors JOBREACH_HOME. Uses context/me.md
+// as the marker because context/ alone exists in the global install (it ships
+// the .example.md files), but the user's real personalized files don't.
 function findContextDir(): string {
-  const candidates = [
+  const fromProject = findProjectRoot(join('context', 'me.md'));
+
+  if (fromProject) {
+    return join(fromProject, 'context');
+  }
+
+  const fallbacks = [
     join(__dirname, '../context'),
     join(__dirname, '../../context'),
   ];
 
-  for (const c of candidates) {
+  for (const c of fallbacks) {
     if (existsSync(c)) {
       return c;
     }
   }
 
-  return candidates[1];
+  return fallbacks[1];
 }
 
 function loadContext(): string {
@@ -85,7 +85,7 @@ Write in a genuine, confident voice. No filler phrases. No corporate-speak. Soun
 // Internal Generator
 // ============================================================================
 
-async function generate(prompt: string, stepName = 'generate'): Promise<string> {
+async function generate(prompt: string): Promise<string> {
   for await (const message of query({
     prompt,
     options: {
@@ -99,16 +99,6 @@ async function generate(prompt: string, stepName = 'generate'): Promise<string> 
   })) {
     if (message.type === 'result') {
       const r = message as ResultMessage;
-      const u = r.usage ?? {};
-
-      recordTokens(
-        stepName,
-        u.input_tokens ?? 0,
-        u.output_tokens ?? 0,
-        u.cache_read_input_tokens ?? 0,
-        u.cache_creation_input_tokens ?? 0,
-        r.total_cost_usd ?? 0,
-      );
 
       if (r.subtype === 'success') {
         return (r.result ?? '').trim();
@@ -149,7 +139,7 @@ export async function extractJobDetails(rawText: string, url: string): Promise<O
 Job URL: ${url}
 
 Text:
-${rawText.slice(0, 4000)}`, 'extract');
+${rawText.slice(0, 4000)}`);
 
   const match = result.match(/\{[\s\S]*\}/);
 
@@ -201,7 +191,7 @@ Rules:
 Role: ${job.title} at ${job.company}
 ${job.location ? `Location: ${job.location}` : ''}
 Description: ${job.description}
-Requirements: ${job.requirements ?? 'Not listed'}`, 'coverLetter');
+Requirements: ${job.requirements ?? 'Not listed'}`);
 }
 
 // ============================================================================
@@ -244,7 +234,7 @@ Rules:
 - One short paragraph, no line breaks
 - Mention the specific role
 - Natural and direct — not a cover letter
-- Don't start with "Hi" as the literal first word`, 'connectionNote');
+- Don't start with "Hi" as the literal first word`);
 
   return note.slice(0, 280);
 }
@@ -283,7 +273,7 @@ Rules per note:
 - Mention the specific role
 - Natural and direct — not a cover letter
 - Don't start with "Hi" as the literal first word
-- Tailor each to the contact's role context above`, 'connectionNotesBatch');
+- Tailor each to the contact's role context above`);
 
   const match = raw.match(/\[[\s\S]*\]/);
 
@@ -329,5 +319,5 @@ Rules:
 - Be specific — reference real projects or experiences from their background where relevant
 - Genuine and reflective, not corporate
 - 150–250 words unless the question clearly calls for something shorter
-- Do NOT start with "I" — vary the opening`, 'qa');
+- Do NOT start with "I" — vary the opening`);
 }

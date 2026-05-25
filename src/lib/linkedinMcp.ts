@@ -65,6 +65,7 @@ export async function getClient(): Promise<Client> {
     const transport = new StdioClientTransport({
       command: 'uv',
       args: ['tool', 'run', 'linkedin-scraper-mcp'],
+      stderr: process.env.JOBREACH_DEBUG_MCP ? 'inherit' : 'ignore',
     });
 
     const client = new Client({ name: 'jobreach', version: '1.0.0' }, { capabilities: {} });

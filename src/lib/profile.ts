@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { findProjectRoot } from './projectRoot.js';
 
 // ============================================================================
 // Types
@@ -26,20 +27,28 @@ interface RawConfig {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Path differs between dev (src/lib/) and built (dist/). Probe both.
+// Path differs between dev (src/lib/) and built (dist/). Also handles the
+// `npm install -g .` case where the install dir doesn't contain git-ignored
+// files — walks up from CWD or honors JOBREACH_HOME.
 function findConfigPath(): string {
-  const candidates = [
+  const fromProject = findProjectRoot('jobreach.config.json');
+
+  if (fromProject) {
+    return join(fromProject, 'jobreach.config.json');
+  }
+
+  const fallbacks = [
     join(__dirname, '../jobreach.config.json'),
     join(__dirname, '../../jobreach.config.json'),
   ];
 
-  for (const c of candidates) {
+  for (const c of fallbacks) {
     if (existsSync(c)) {
       return c;
     }
   }
 
-  return candidates[1];
+  return fallbacks[1];
 }
 
 const CONFIG_PATH = findConfigPath();
