@@ -74,7 +74,7 @@ There are two layers of personalization, both git-ignored. The repo ships `.exam
 cp jobreach.config.example.json jobreach.config.json
 ```
 
-Open `jobreach.config.json` and fill in your first name, school (if you're a student), and grad month. If you're not a student, remove the `school` and `gradMonth` lines — the tool drops the new-grad framing and the alumni-search slot becomes a generalist recruiter search.
+Open `jobreach.config.json` and fill in your first name, school (if you're a student), and grad month. If you're not a student, remove the `school` and `gradMonth` lines — the LinkedIn discovery agent disables its alumni heuristic and leans on recruiter / university-recruiter / engineer categories instead, and the new-grad framing drops out of connection notes.
 
 **Layer 2 — voice and background (long-form):**
 
