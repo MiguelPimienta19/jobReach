@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import terminalLink from 'terminal-link';
 import { scrapeJobPosting } from '../lib/scraper.js';
 import { extractJobDetails, generateCoverLetter, generateConnectionNotesBatch } from '../lib/generator.js';
 import { findContactsForJob, closeLinkedinAgent } from '../agents/linkedinAgent.js';
@@ -159,7 +160,9 @@ function printSummary(job: Omit<JobPosting, 'id' | 'status' | 'coverLetter'>, co
       const roleLabel = ({ recruiter: chalk.magenta('Recruiter'), university_recruiter: chalk.green('University Recruiter'), alumni: chalk.cyan(alumniLabel), engineer: chalk.yellow('Engineer (Referral)') }[contact.roleType]) ?? chalk.dim(contact.roleType);
       console.log(`\n  ${chalk.bold(`${i + 1}. ${contact.name}`)}  ·  ${contact.title}  [${roleLabel}]`);
       if (contact.linkedinUrl) {
-        console.log(`     ${chalk.cyan.underline(contact.linkedinUrl)}`);
+        const styled = chalk.cyan.underline(contact.linkedinUrl);
+        const link = terminalLink(styled, contact.linkedinUrl, { fallback: (text) => text });
+        console.log(`     ${link}`);
       } else {
         console.log(`     ${chalk.dim('No LinkedIn URL found')}`);
       }
