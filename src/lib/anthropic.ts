@@ -1,9 +1,12 @@
+import './env.js';
 import Anthropic from '@anthropic-ai/sdk';
 
 // ============================================================================
 // Client + Model Constants
 // ============================================================================
 
+// './env.js' is imported above for its side effect — it loads .env before this
+// client is constructed, so process.env.ANTHROPIC_API_KEY is populated in time.
 export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
