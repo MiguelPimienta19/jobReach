@@ -4,6 +4,7 @@ import ora from 'ora';
 import { select, input } from '@inquirer/prompts';
 import { getJobByUrl, listJobs } from '../lib/supabase.js';
 import { answerApplicationQuestion } from '../lib/generator.js';
+import { copyMenu } from '../lib/copyMenu.js';
 
 // ============================================================================
 // Command Definition
@@ -61,4 +62,6 @@ export const qaCommand = new Command('qa')
     console.log('\n' + chalk.bold.cyan('  ANSWER'));
     console.log(answer.split('\n').map(l => '  ' + l).join('\n'));
     console.log();
+
+    await copyMenu([{ label: 'Answer', text: answer }]);
   });

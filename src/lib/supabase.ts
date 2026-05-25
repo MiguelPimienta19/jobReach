@@ -145,32 +145,3 @@ export async function getContactsForJob(jobId: string): Promise<ContactRow[]> {
   }));
 }
 
-export async function updateConnectionNote(contactId: string, note: string): Promise<void> {
-  const { error } = await getClient().from('contacts').update({ connection_note: note }).eq('id', contactId);
-
-  if (error) {
-    throw new Error(`Supabase error updating connection note: ${error.message}`);
-  }
-}
-
-// ============================================================================
-// Messages
-// ============================================================================
-
-export async function saveMessage(contactId: string, jobId: string, content: string, platform = 'linkedin'): Promise<string> {
-  const { data, error } = await getClient().from('messages').insert({ contact_id: contactId, job_id: jobId, platform, content, status: 'draft' }).select('id').single();
-
-  if (error) {
-    throw new Error(`Supabase error saving message: ${error.message}`);
-  }
-
-  return data.id as string;
-}
-
-export async function markMessageSent(messageId: string): Promise<void> {
-  const { error } = await getClient().from('messages').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', messageId);
-
-  if (error) {
-    throw new Error(`Supabase error marking message sent: ${error.message}`);
-  }
-}

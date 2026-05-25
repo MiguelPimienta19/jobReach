@@ -26,17 +26,6 @@ CREATE TABLE IF NOT EXISTS contacts (
   UNIQUE (job_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS messages (
-  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  contact_id UUID        NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
-  job_id     UUID        NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-  platform   TEXT        NOT NULL DEFAULT 'linkedin',
-  content    TEXT        NOT NULL,
-  status     TEXT        NOT NULL DEFAULT 'draft',
-  sent_at    TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN NEW.updated_at = NOW(); RETURN NEW; END;

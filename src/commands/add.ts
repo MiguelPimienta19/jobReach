@@ -3,10 +3,10 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { scrapeJobPosting } from '../lib/scraper.js';
 import { extractJobDetails, generateCoverLetter, generateConnectionNotesBatch } from '../lib/generator.js';
-import { findPeopleAtCompany } from '../lib/agent.js';
-import { closeLinkedinMcp } from '../lib/linkedinMcp.js';
+import { findContactsForJob, closeLinkedinAgent } from '../agents/linkedinAgent.js';
 import { saveJob, saveContact, getJobByUrl } from '../lib/supabase.js';
 import { loadProfile } from '../lib/profile.js';
+import { copyMenu } from '../lib/copyMenu.js';
 import type { Contact, JobPosting } from '../types.js';
 
 // ============================================================================
@@ -61,9 +61,10 @@ export const addCommand = new Command('add')
     let contacts: Contact[] = [];
     const linkedinTrace: string[] = [];
     try {
+      const jobForAgent = { ...job, status: 'pending' as const };
       [coverLetter, contacts] = await Promise.all([
         generateCoverLetter(job).catch(e => { parallelSpinner.text = chalk.dim(`Cover letter error: ${e}`); return ''; }),
-        findPeopleAtCompany(job.company, job.title, msg => {
+        findContactsForJob(jobForAgent, msg => {
           linkedinTrace.push(msg);
           parallelSpinner.text = chalk.dim(msg);
         }).catch(() => [] as Contact[]),
@@ -74,17 +75,12 @@ export const addCommand = new Command('add')
       parallelSpinner.warn(`Parallel step error (continuing): ${e}`);
     }
 
-    // If LinkedIn discovery returned 0 contacts, surface the diagnostic trace
+    // If LinkedIn discovery returned 0 contacts, surface the last few trace lines
     // so the user can see why (rate limit, no JSON, empty slate, etc.).
     if (contacts.length === 0 && linkedinTrace.length > 0) {
-      const diagnostics = linkedinTrace.filter(m => m.startsWith('rank:') || m.includes('failed'));
-      if (diagnostics.length > 0) {
-        console.log(chalk.dim(`  LinkedIn diagnostics:`));
-        for (const d of diagnostics) {
-          console.log(chalk.dim(`    · ${d}`));
-        }
-      } else {
-        console.log(chalk.dim(`  LinkedIn last step: ${linkedinTrace[linkedinTrace.length - 1]}`));
+      console.log(chalk.dim(`  LinkedIn agent last steps:`));
+      for (const d of linkedinTrace.slice(-3)) {
+        console.log(chalk.dim(`    · ${d}`));
       }
     }
 
@@ -115,8 +111,14 @@ export const addCommand = new Command('add')
 
     printSummary(job, contacts, coverLetter, saved);
 
-    // findPeopleAtCompany opens the persistent MCP client; close it so the CLI exits cleanly.
-    await closeLinkedinMcp();
+    // The LinkedIn agent opens a persistent upstream MCP client; close it before the
+    // interactive copy menu so the CLI exits cleanly once the user is done.
+    await closeLinkedinAgent();
+
+    await copyMenu([
+      { label: 'Cover letter', text: coverLetter },
+      ...contacts.map(c => ({ label: `Note → ${c.name} (${c.title})`, text: c.connectionNote ?? '' })),
+    ]);
   });
 
 // ============================================================================

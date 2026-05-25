@@ -15,78 +15,75 @@ There are no tests. Type-check with `npx tsc --noEmit`.
 To install globally for local testing after build:
 ```bash
 npm install -g .
-jobreach add <url> [--connect]
+jobreach add <url>
 jobreach qa [url] [question] [--pick]
 jobreach list
-jobreach connect [--yes] [--regen]
 ```
 
 ## Environment
 
 Requires a `.env` file at the project root (see `.env.example`):
+- `ANTHROPIC_API_KEY` — drives the generation layer (cover letter, notes, qa, extract) via the raw Anthropic SDK
 - `SUPABASE_URL` — Supabase project URL
 - `SUPABASE_SECRET_KEY` — Supabase secret key (`sb_secret_...`). Replaces the legacy `service_role` key. Used because jobreach is a user-controlled local CLI with full read/write needs and no RLS — that's a "trusted backend" context, not a public client.
 
-The Agent SDK (`@anthropic-ai/claude-agent-sdk`) uses the user's Claude Code subscription — no separate Anthropic API key is needed.
+The LinkedIn discovery agent (`src/agents/linkedinAgent.ts`) uses `@anthropic-ai/claude-agent-sdk`, which runs on the user's Claude Code subscription — separate from `ANTHROPIC_API_KEY`.
 
-The `connect` command and `add --connect` both shell out to the **`linkedin-scraper-mcp`** MCP server, launched as `uv tool run linkedin-scraper-mcp`. `uv` must be installed and the tool available, or LinkedIn actions will fail. The same MCP server is also used by `findPeopleAtCompany` for contact discovery.
+The agent shells out to the **`linkedin-scraper-mcp`** MCP server as a subprocess (`uv tool run linkedin-scraper-mcp`). `uv` must be installed and the tool available, or LinkedIn discovery will fail.
 
 ### Personalization config
 
 Two layers, both git-ignored, both with committed `.example` templates:
-- `jobreach.config.json` — identity (`name`, `school`, `schoolShort`, `gradMonth`). Loaded by `src/lib/profile.ts` with `loadProfile()`. Missing or unparseable → warning + generic defaults (`name = "the applicant"`, no school, no gradMonth); the tool still runs end-to-end.
-- `context/*.md` — long-form background (`me.md`, `resume.md`, `writing-samples.md`, `targets.md`), concatenated into the generator's system prompt. Missing all four → warning + generic stub bio.
+- `jobreach.config.json` — identity (`name`, `school`, `schoolShort`, `gradMonth`). Loaded by `src/lib/profile.ts` with `loadProfile()`. Missing or unparseable → warning + generic defaults; the tool still runs end-to-end.
+- `context/*.md` — three per-task files, each scoped to specific generation calls (see Personalization context below).
 
-Partial config is supported: if `school` is undefined, `agent.ts` swaps the alumni search slot for a generalist recruiter search; if `gradMonth` is undefined, the university-recruiter framing drops new-grad language.
+Partial config is supported: if `school` is undefined, the LinkedIn agent system prompt drops the alumni heuristic; if `gradMonth` is undefined, the new-grad framing in connection notes drops.
 
 ## Architecture
 
-CLI entrypoint `src/index.ts` registers four commands. Each command drives a multi-step async pipeline displayed via `ora` spinners.
+CLI entrypoint `src/index.ts` registers three commands. Each command drives a multi-step async pipeline displayed via `ora` spinners and ends with an interactive copy menu where applicable.
 
-### `jobreach add <url> [--connect]` (`src/commands/add.ts`)
+### `jobreach add <url>` (`src/commands/add.ts`)
 
 1. Dedup check against Supabase (silently skipped if Supabase isn't configured)
 2. Scrape the job URL via Playwright headless Chrome (`src/lib/scraper.ts`)
-3. Extract structured job fields — `extractJobDetails()` in `src/lib/generator.ts`
-4. **In parallel:** generate cover letter + find contacts via LinkedIn MCP (`findPeopleAtCompany()` in `src/lib/agent.ts`)
-5. **In parallel per contact:** generate a ≤280-char LinkedIn connection note (`generateConnectionNote()` in `src/lib/generator.ts`)
-6. Persist everything to Supabase (jobs → contacts → messages)
+3. Extract structured job fields — `extractJobDetails()` in `src/lib/generator.ts` (Haiku, no context file)
+4. **In parallel:** generate cover letter via `generateCoverLetter()` (Sonnet) + find contacts via `findContactsForJob()` in `src/agents/linkedinAgent.ts` (multi-turn Haiku agent)
+5. **Batched (one call):** generate ≤280-char LinkedIn connection notes via `generateConnectionNotesBatch()`
+6. Persist everything to Supabase (jobs → contacts, note inline on each contact row)
 7. Print a formatted terminal summary
-8. If `--connect` is passed: send LinkedIn connection requests for every contact with a `linkedinUrl` via `sendConnections()` in `src/lib/linkedin.ts`
+8. Interactive copy menu (`src/lib/copyMenu.ts`) — cover letter + each note
 
 ### `jobreach qa [url] [question] [--pick]` (`src/commands/qa.ts`)
 
-Looks up a previously tracked job by URL (or interactively via `--pick` / when url is omitted), then calls `answerApplicationQuestion()` in `src/lib/generator.ts` to draft an answer (150–250 words).
+Looks up a previously tracked job by URL (or interactively via `--pick` / when url is omitted), then calls `answerApplicationQuestion()` in `src/lib/generator.ts` to draft an answer (150–250 words, Sonnet). Ends with a copy menu.
 
 ### `jobreach list` (`src/commands/list.ts`)
 
 Prints all tracked jobs, most recent first, with status color-coded.
 
-### `jobreach connect [--yes] [--regen]` (`src/commands/connect.ts`)
+### Two SDKs, two jobs
 
-Sends LinkedIn connection requests for a previously tracked job. Interactive job picker via `@inquirer/prompts`. Flags:
-- `--regen` regenerates connection notes via `generateConnectionNote()` and saves them back to Supabase
-- `--yes` skips per-contact confirmation and sends all
-- Default flow: prompts per contact before sending; updates `messages.status` to `sent` after success
+The repo deliberately mixes two Anthropic SDKs:
 
-### `src/lib/agent.ts` vs `src/lib/generator.ts`
+- **`src/lib/generator.ts`** — uses `@anthropic-ai/sdk` (raw API) via `src/lib/anthropic.ts`. Single-turn `messages.create` calls, no tools, no streaming, ~200ms cold. Four exported functions (`extractJobDetails`, `generateCoverLetter`, `generateConnectionNotesBatch`, `answerApplicationQuestion`), each with its own scoped system prompt. `MODEL_FAST` (Haiku) is used for extraction; `MODEL_WRITER` (Sonnet) for everything else.
+- **`src/agents/linkedinAgent.ts`** — uses `@anthropic-ai/claude-agent-sdk` (`query()` loop). One real multi-turn agent (`maxTurns: 5`, Haiku 4.5) with an SDK MCP server wrapping the upstream `linkedin-scraper-mcp`. The wrapper proxies `get_company_employees` and `search_people` then slims each response down to `{name, title, linkedinUrl}` before returning to the agent. Tight system prompt with pre-loaded heuristics (recruiter/uni-recruiter/alumni/engineer regex categories) keeps the agent acting rather than figuring out title taxonomy.
 
-Both use `query()` from `@anthropic-ai/claude-agent-sdk`, but differently:
-
-- **`agent.ts`** — multi-turn agentic loop (`maxTurns: 10`) with the `linkedin-scraper-mcp` MCP server attached. Uses `get_company_employees` and `search_people` to find recruiters and university recruiters (max 3). Streams messages from the loop and parses the final JSON array of contacts from the terminal `result` message. Runs with `allowDangerouslySkipPermissions: true` and `permissionMode: 'bypassPermissions'`. Local interfaces: `AgentContentBlock`, `AgentTextBlock`, `RawContactResult`, `ResultMessage`.
-- **`generator.ts`** — single-turn (`maxTurns: 1`), no tools (`allowedTools: []`, `permissionMode: 'dontAsk'`), just text generation. All generation functions share a `MY_BACKGROUND` system prompt built at module load by `loadContext()`, which concatenates `context/me.md`, `context/resume.md`, `context/writing-samples.md`, and `context/targets.md` (whichever exist). Each generation call also pulls `loadProfile()` from `src/lib/profile.ts` to template `${profile.name}` / `${profile.school}` / `${profile.gradMonth}` into the per-call prompt. Local interfaces: `ResultMessage`, `ParsedJobDetails`.
-- **`linkedin.ts`** — uses `query()` to drive the LinkedIn MCP's `connect_with_person` tool, sending a connection request with a specific note. Runs per-contact with progress streamed through `ora` spinners. Local interfaces: `ContentBlock`, `TextContent`, `ResultMessage`.
+The agent owns the upstream MCP client; `closeLinkedinAgent()` is called from `add.ts` after the pipeline so the CLI exits cleanly.
 
 ### Personalization context (`context/`)
 
-The `context/` directory holds personal background that the generator reads at runtime. All four files are concatenated by `loadContext()` in `generator.ts` and injected into the system prompt. Each is independently optional — if a file is missing it's skipped; if all four are missing the tool warns and uses a generic stub.
+The `context/` directory holds personal background that the generation layer reads at runtime. Each file is loaded independently and scoped to specific calls:
 
-- `me.md` — bio, voice rules, writing style. The canonical voice anchor.
-- `resume.md` — bullets, metrics, dates, stacks.
-- `writing-samples.md` — real cover letters and connection notes for tone calibration.
-- `targets.md` — role/company preferences.
+| File | Loaded by | Notes |
+|---|---|---|
+| `context/me.md` | cover letter, qa | Canonical voice anchor — bio, voice rules, projects, resume material |
+| `context/cover-letter.md` | cover letter only | Format rules + one verbatim sample for tone calibration |
+| `context/connection-note.md` | connection notes only | Self-contained — does NOT load `me.md`; voice distilled for ≤280-char outreach + verbatim samples |
 
-`.example.md` siblings for each ship in the repo as templates. The real files are git-ignored.
+`extractJobDetails` uses no context file — just a tiny inline JSON-schema prompt. `.example.md` siblings ship in the repo as templates; the real files are git-ignored.
+
+Missing any single file is fine — that call degrades silently. Missing all three triggers a one-line warning at module load.
 
 ### Code style
 
@@ -102,11 +99,11 @@ Do not collapse `if` blocks onto one line. Do not skip braces. Keep this style c
 
 ### Database schema (`supabase/schema.sql`)
 
-Three tables: `jobs` (one row per URL, unique on `url`), `contacts` (many per job, FK to jobs, unique on `(job_id, name)`), `messages` (many per contact+job, FKs to both, status: `draft | sent | replied`). `saveJob()` upserts on `url` conflict; `saveContact()` upserts on `(job_id, name)`.
+Two tables: `jobs` (one row per URL, unique on `url`) and `contacts` (many per job, FK to jobs, unique on `(job_id, name)`, with `connection_note` inline). `saveJob()` upserts on `url` conflict; `saveContact()` upserts on `(job_id, name)`.
 
-The TypeScript field names use camelCase while Supabase columns use snake_case — the mapping happens in `src/lib/supabase.ts`.
+The TypeScript field names use camelCase while Supabase columns use snake_case — mapping happens in `src/lib/supabase.ts`.
 
-Run `supabase/schema.sql` in the Supabase SQL Editor to initialize the database. The file reflects the current canonical schema.
+Run `supabase/schema.sql` in the Supabase SQL Editor to initialize the database. The file reflects the current canonical schema. The `supabase/migrations/` directory tracks incremental changes; the most recent (`20260524000000_drop_messages.sql`) drops the obsolete `messages` table and moves any saved content onto `contacts.connection_note`.
 
 ### Module system
 
