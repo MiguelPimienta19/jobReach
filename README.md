@@ -11,7 +11,7 @@ jobreach add <url>
 1. **Scrape** — Playwright fetches the job posting (handles JS-rendered pages)
 2. **Parse** — Claude Haiku extracts title, company, description, requirements, location
 3. **Cover letter** — Claude Sonnet writes a targeted cover letter in your voice
-4. **LinkedIn discovery agent** — A multi-turn Claude Haiku agent uses the LinkedIn MCP server to list employees and (if needed) broaden via search, then ranks up to 3 contacts (recruiter, alum, engineer). Runs in parallel with the cover letter.
+4. **Contact discovery** — A deterministic finder fires a few Google searches (via the Serper.dev API) for public LinkedIn profiles at the company, parses the results, and ranks up to 3 contacts (recruiter, alum, engineer). No LLM, no scraping. Runs in parallel with the cover letter.
 5. **Connection notes** — One batched Claude Sonnet call writes a ≤280-char LinkedIn connection request note for every contact
 6. **Persist** — Everything saved to Supabase (deduplicates by URL)
 7. **Copy menu** — Arrow-key through cover letter and each note to copy to clipboard
@@ -33,10 +33,9 @@ Looks up an already-tracked job and answers an application question in your voic
 ## Prerequisites
 
 - **Node.js 18+**
-- **[uv](https://docs.astral.sh/uv/)** — Python package manager (for the LinkedIn MCP server)
 - **Supabase account** — [supabase.com](https://supabase.com), free tier is fine
 - **Anthropic API key** — for the generation layer (cover letter, notes, qa, extract) via the raw Anthropic SDK
-- **Claude Code subscription** — the LinkedIn discovery agent uses the Agent SDK, which runs on your Claude Code subscription separately from the API key above
+- **Serper.dev API key** — for contact discovery via Google search. Free tier is 2,500 queries at [serper.dev](https://serper.dev)
 
 ---
 
@@ -62,7 +61,10 @@ Open `.env` and fill in:
 ANTHROPIC_API_KEY=sk-ant-your_key_here
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_your_key_here
+SERPER_API_KEY=your_serper_key_here
 ```
+
+`SERPER_API_KEY` is optional to set here. If you leave it blank, the first `jobreach add` prompts for it once and writes it to `.env` for you. Enter nothing at that prompt to skip contact discovery for the run — the rest of the pipeline still works.
 
 ### 3. Personalize the output
 
@@ -74,7 +76,7 @@ There are two layers of personalization, both git-ignored. The repo ships `.exam
 cp jobreach.config.example.json jobreach.config.json
 ```
 
-Open `jobreach.config.json` and fill in your first name, school (if you're a student), and grad month. If you're not a student, remove the `school` and `gradMonth` lines — the LinkedIn discovery agent disables its alumni heuristic and leans on recruiter / university-recruiter / engineer categories instead, and the new-grad framing drops out of connection notes.
+Open `jobreach.config.json` and fill in your first name, school (if you're a student), and grad month. If you're not a student, remove the `school` and `gradMonth` lines — the contact finder drops its alumni query and heuristic and leans on recruiter / university-recruiter / engineer categories instead, and the new-grad framing drops out of connection notes.
 
 **Layer 2 — voice and background (long-form):**
 
@@ -100,27 +102,13 @@ In your Supabase dashboard, open the **SQL Editor** and run [`supabase/schema.sq
 
 If you're upgrading an older install that still has the `messages` table, also run [`supabase/migrations/20260524000000_drop_messages.sql`](supabase/migrations/20260524000000_drop_messages.sql) to migrate any saved notes onto `contacts.connection_note` and drop the obsolete table.
 
-### 5. Install the LinkedIn MCP server
-
-```bash
-uv tool install linkedin-scraper-mcp
-```
-
-### 6. Log in to LinkedIn
-
-```bash
-uv tool run linkedin-scraper-mcp --login
-```
-
-This opens a browser for you to log in. Your session is saved locally and reused on subsequent runs. Without it, contact discovery will be skipped.
-
-### 7. Build
+### 5. Build
 
 ```bash
 npm run build
 ```
 
-### 8. Link globally
+### 6. Link globally
 
 ```bash
 npm link
@@ -190,10 +178,10 @@ Job status can be: `pending` → `applied` → `interview` → `offer` / `reject
 
 ## Architecture overview
 
-Two LLM layers, used for what each does best:
+Two layers, used for what each does best:
 
 - **Generation layer** (raw Anthropic SDK): cover letter, connection notes, qa, extract. Single-turn, no tools, ~200ms cold call. Sonnet for writing; Haiku for structured extraction.
-- **Discovery agent** (Agent SDK on Claude Code subscription): one real agent at `src/agents/linkedinAgent.ts`. Multi-turn (≤5), Haiku 4.5, with a slim MCP wrapper around `linkedin-scraper-mcp` that trims employee payloads down to `{name, title, linkedinUrl}` before they reach the model.
+- **Contact finder** (no LLM): `src/lib/contactFinder.ts`. Fires ~3 Google X-ray queries per job through the Serper.dev API, parses public LinkedIn result titles into name/title/company/URL, classifies with deterministic regex heuristics, and ranks diversity-first (`university_recruiter > alumni > recruiter > engineer`) for up to 3 contacts. Public search only, no LinkedIn login, no scraping. The pure parsing/ranking functions are unit-tested with vitest.
 
 ---
 
@@ -204,11 +192,10 @@ Two LLM layers, used for what each does best:
 | `commander` | CLI argument parsing |
 | `playwright` | Headless browser scraping |
 | `@anthropic-ai/sdk` | Raw Anthropic SDK — generation layer (cover letter, notes, qa, extract) |
-| `@anthropic-ai/claude-agent-sdk` | Agent SDK — drives the LinkedIn discovery agent with MCP tools |
-| `@modelcontextprotocol/sdk` | TypeScript MCP client used by the agent's slim payload wrapper |
-| `linkedin-scraper-mcp` | LinkedIn scraper exposed as an MCP server (Python, run via `uv`) |
+| Serper.dev API | Google search results for contact discovery (called over plain HTTP) |
 | `@supabase/supabase-js` | Persistence |
 | `clipboardy` | Cross-platform clipboard for the copy menu |
-| `@inquirer/prompts` | Interactive pickers (qa picker, copy menu) |
+| `@inquirer/prompts` | Interactive pickers (qa picker, copy menu, Serper key prompt) |
 | `ora` + `chalk` | Terminal output |
 | `tsup` | Build (ESM output) |
+| `vitest` | Unit tests for the contact finder |

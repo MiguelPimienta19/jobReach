@@ -10,7 +10,7 @@ npm run build           # Compile to dist/ via tsup (ESM, adds shebang)
 npm start               # Run compiled dist/index.js directly
 ```
 
-There are no tests. Type-check with `npx tsc --noEmit`.
+Tests exist for the contact finder's pure functions — run them with `npm test` (vitest). Type-check with `npx tsc --noEmit`.
 
 To install globally for local testing after build:
 ```bash
@@ -26,10 +26,7 @@ Requires a `.env` file at the project root (see `.env.example`):
 - `ANTHROPIC_API_KEY` — drives the generation layer (cover letter, notes, qa, extract) via the raw Anthropic SDK
 - `SUPABASE_URL` — Supabase project URL
 - `SUPABASE_SECRET_KEY` — Supabase secret key (`sb_secret_...`). Replaces the legacy `service_role` key. Used because jobreach is a user-controlled local CLI with full read/write needs and no RLS — that's a "trusted backend" context, not a public client.
-
-The LinkedIn discovery agent (`src/agents/linkedinAgent.ts`) uses `@anthropic-ai/claude-agent-sdk`, which runs on the user's Claude Code subscription — separate from `ANTHROPIC_API_KEY`.
-
-The agent shells out to the **`linkedin-scraper-mcp`** MCP server as a subprocess (`uv tool run linkedin-scraper-mcp`). `uv` must be installed and the tool available, or LinkedIn discovery will fail.
+- `SERPER_API_KEY` — Serper.dev API key for contact discovery (`src/lib/contactFinder.ts`). Free tier is 2,500 queries at serper.dev. If unset, `jobreach add` prompts for it interactively once and persists it to `.env`. Entering nothing skips contact discovery for that run; the rest of the pipeline is unaffected.
 
 ### Personalization config
 
@@ -37,7 +34,7 @@ Two layers, both git-ignored, both with committed `.example` templates:
 - `jobreach.config.json` — identity (`name`, `school`, `schoolShort`, `gradMonth`). Loaded by `src/lib/profile.ts` with `loadProfile()`. Missing or unparseable → warning + generic defaults; the tool still runs end-to-end.
 - `context/*.md` — three per-task files, each scoped to specific generation calls (see Personalization context below).
 
-Partial config is supported: if `school` is undefined, the LinkedIn agent system prompt drops the alumni heuristic; if `gradMonth` is undefined, the new-grad framing in connection notes drops.
+Partial config is supported: if `school` is undefined, the contact finder drops its alumni query and heuristic; if `gradMonth` is undefined, the new-grad framing in connection notes drops.
 
 ## Architecture
 
@@ -48,7 +45,7 @@ CLI entrypoint `src/index.ts` registers three commands. Each command drives a mu
 1. Dedup check against Supabase (silently skipped if Supabase isn't configured)
 2. Scrape the job URL via Playwright headless Chrome (`src/lib/scraper.ts`)
 3. Extract structured job fields — `extractJobDetails()` in `src/lib/generator.ts` (Haiku, no context file)
-4. **In parallel:** generate cover letter via `generateCoverLetter()` (Sonnet) + find contacts via `findContactsForJob()` in `src/agents/linkedinAgent.ts` (multi-turn Haiku agent)
+4. **In parallel:** generate cover letter via `generateCoverLetter()` (Sonnet) + find contacts via `findContactsForJob()` in `src/lib/contactFinder.ts` (deterministic SERP queries, no LLM)
 5. **Batched (one call):** generate ≤280-char LinkedIn connection notes via `generateConnectionNotesBatch()`
 6. Persist everything to Supabase (jobs → contacts, note inline on each contact row)
 7. Print a formatted terminal summary
@@ -62,14 +59,14 @@ Looks up a previously tracked job by URL (or interactively via `--pick` / when u
 
 Prints all tracked jobs, most recent first, with status color-coded.
 
-### Two SDKs, two jobs
+### Generation vs. contact discovery
 
-The repo deliberately mixes two Anthropic SDKs:
+One Anthropic SDK, plus a deterministic non-LLM contact finder:
 
 - **`src/lib/generator.ts`** — uses `@anthropic-ai/sdk` (raw API) via `src/lib/anthropic.ts`. Single-turn `messages.create` calls, no tools, no streaming, ~200ms cold. Four exported functions (`extractJobDetails`, `generateCoverLetter`, `generateConnectionNotesBatch`, `answerApplicationQuestion`), each with its own scoped system prompt. `MODEL_FAST` (Haiku) is used for extraction; `MODEL_WRITER` (Sonnet) for everything else.
-- **`src/agents/linkedinAgent.ts`** — uses `@anthropic-ai/claude-agent-sdk` (`query()` loop). One real multi-turn agent (`maxTurns: 5`, Haiku 4.5) with an SDK MCP server wrapping the upstream `linkedin-scraper-mcp`. The wrapper proxies `get_company_employees` and `search_people` then slims each response down to `{name, title, linkedinUrl}` before returning to the agent. Tight system prompt with pre-loaded heuristics (recruiter/uni-recruiter/alumni/engineer regex categories) keeps the agent acting rather than figuring out title taxonomy.
+- **`src/lib/contactFinder.ts`** — no LLM, no scraping, no MCP, no Python. Given a job's company, it fires Google X-ray queries through the Serper.dev API (`site:linkedin.com/in "recruiter" "<company>"` etc.), parses the public search-result titles/snippets into name/title/company/profile-URL, classifies with deterministic regex heuristics, and ranks diversity-first with priority `university_recruiter > alumni > recruiter > engineer`, returning up to 3 contacts. Query strategy: 3 parallel queries (recruiter / university-early-career / school-alumni when `school` is configured), plus one "software engineer" backfill query only when fewer than 3 candidates survive filtering. Precision guards: candidates without a parseable title are dropped (no placeholders), and a company fuzzy-match plus "former/ex-" filtering drops ex-employees. The pure functions (`parseResult`, `classifyTitle`, `isCurrentEmployee`, `rankCandidates`) are unit-tested — run `npm test`.
 
-The agent owns the upstream MCP client; `closeLinkedinAgent()` is called from `add.ts` after the pipeline so the CLI exits cleanly.
+**Why SERP instead of scraping:** the old path authenticated against LinkedIn and scraped it, a ToS violation with account-ban risk and a Python/uv/MCP subprocess dependency. The contact finder replaces that with public search-index queries — zero LinkedIn contact, deterministic, testable, ~3 Serper queries per job.
 
 ### Personalization context (`context/`)
 

@@ -32,13 +32,3 @@ export interface Contact {
   roleType: RoleType;
   connectionNote?: string;
 }
-
-export interface BraveWebResult {
-  title: string;
-  url: string;
-  description: string;
-}
-
-export interface BraveSearchResponse {
-  web?: { results: BraveWebResult[] };
-}

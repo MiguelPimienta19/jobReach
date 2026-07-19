@@ -4,7 +4,7 @@ import ora from 'ora';
 import terminalLink from 'terminal-link';
 import { scrapeJobPosting } from '../lib/scraper.js';
 import { extractJobDetails, generateCoverLetter, generateConnectionNotesBatch } from '../lib/generator.js';
-import { findContactsForJob, closeLinkedinAgent } from '../agents/linkedinAgent.js';
+import { findContactsForJob, ensureSerperKey } from '../lib/contactFinder.js';
 import { saveJob, saveContact, getJobByUrl } from '../lib/supabase.js';
 import { loadProfile } from '../lib/profile.js';
 import { copyMenu } from '../lib/copyMenu.js';
@@ -20,7 +20,12 @@ export const addCommand = new Command('add')
   .action(async (url: string) => {
     console.log(chalk.bold.blue('\n  jobreach  —  Personal Job Search Assistant\n'));
 
-    // Deduplicate — let DB errors surface rather than silently skipping the check
+    // Trigger the one-time interactive Serper key prompt on a clean tty before any
+    // ora spinner starts (interactive prompts and spinners conflict). findContactsForJob
+    // re-reads the env internally, so the return value is ignored here.
+    await ensureSerperKey();
+
+    // Dedup check — any Supabase error (unconfigured, network) skips the check and proceeds
     const dupSpinner = ora('Checking database...').start();
     let existing: Awaited<ReturnType<typeof getJobByUrl>> = null;
     try {
@@ -57,16 +62,16 @@ export const addCommand = new Command('add')
     }
 
     // Cover letter + contact search in parallel
-    const parallelSpinner = ora('Generating cover letter & searching LinkedIn...').start();
+    const parallelSpinner = ora('Generating cover letter & finding contacts...').start();
     let coverLetter = '';
     let contacts: Contact[] = [];
-    const linkedinTrace: string[] = [];
+    const discoveryTrace: string[] = [];
     try {
       const jobForAgent = { ...job, status: 'pending' as const };
       [coverLetter, contacts] = await Promise.all([
         generateCoverLetter(job).catch(e => { parallelSpinner.text = chalk.dim(`Cover letter error: ${e}`); return ''; }),
         findContactsForJob(jobForAgent, msg => {
-          linkedinTrace.push(msg);
+          discoveryTrace.push(msg);
           parallelSpinner.text = chalk.dim(msg);
         }).catch(() => [] as Contact[]),
       ]);
@@ -76,11 +81,11 @@ export const addCommand = new Command('add')
       parallelSpinner.warn(`Parallel step error (continuing): ${e}`);
     }
 
-    // If LinkedIn discovery returned 0 contacts, surface the last few trace lines
+    // If contact discovery returned 0 contacts, surface the last few trace lines
     // so the user can see why (rate limit, no JSON, empty slate, etc.).
-    if (contacts.length === 0 && linkedinTrace.length > 0) {
-      console.log(chalk.dim(`  LinkedIn agent last steps:`));
-      for (const d of linkedinTrace.slice(-3)) {
+    if (contacts.length === 0 && discoveryTrace.length > 0) {
+      console.log(chalk.dim(`  Contact discovery last steps:`));
+      for (const d of discoveryTrace.slice(-3)) {
         console.log(chalk.dim(`    · ${d}`));
       }
     }
@@ -93,7 +98,12 @@ export const addCommand = new Command('add')
       contacts.forEach((contact, i) => {
         contact.connectionNote = notes[i] ?? '';
       });
-      msgSpinner.succeed('Connection notes ready');
+
+      if (notes.length === 0) {
+        msgSpinner.warn('Connection note generation failed — notes empty');
+      } else {
+        msgSpinner.succeed('Connection notes ready');
+      }
     }
 
     // Persist
@@ -111,10 +121,6 @@ export const addCommand = new Command('add')
     }
 
     printSummary(job, contacts, coverLetter, saved);
-
-    // The LinkedIn agent opens a persistent upstream MCP client; close it before the
-    // interactive copy menu so the CLI exits cleanly once the user is done.
-    await closeLinkedinAgent();
 
     await copyMenu([
       { label: 'Cover letter', text: coverLetter },
