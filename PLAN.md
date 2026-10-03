@@ -224,7 +224,7 @@ This is why **the Anthropic SDK is the right tool for our generation calls** —
 - [ ] `src/lib/supabase.ts` — remove `updateConnectionNote()` (move note inline onto contact row). Add `connection_note` to the contact insert.
 - [ ] `supabase/schema.sql` — canonicalize: drop `messages` table, add `connection_note` column to `contacts`.
 - [ ] `package.json` — add `@anthropic-ai/sdk` and `clipboardy`. Add `ANTHROPIC_API_KEY` to `.env.example`.
-- [ ] `README.md`, `CLAUDE.md` — update to reflect the new architecture and the API key requirement.
+- [ ] `README.md`, `AGENTS.md` — update to reflect the new architecture and the API key requirement.
 
 ---
 
@@ -561,7 +561,7 @@ Each phase should leave the repo in a working state. Commit at every phase bound
 
 ### Phase 6 — Docs
 - [ ] Update `README.md` — new commands, new env var, new architecture summary, new `context/` layout (`me.md` + `cover-letter.md` + `connection-note.md`)
-- [ ] Update `CLAUDE.md` — drop references to deleted files (`resume.md`, `writing-samples.md`, `targets.md`), document the agent split, document the per-task context layout + caching strategy
+- [ ] Update `AGENTS.md` — drop references to deleted files (`resume.md`, `writing-samples.md`, `targets.md`), document the agent split, document the per-task context layout + caching strategy
 - [ ] Delete or archive this PLAN.md once the work is done
 
 ---

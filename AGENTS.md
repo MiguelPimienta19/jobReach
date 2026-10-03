@@ -1,6 +1,12 @@
-# CLAUDE.md
+# AGENTS.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Two rules that are not negotiable:
+
+1. The LinkedIn scraping path was removed on purpose. It authenticated against LinkedIn and scraped it, which violates their ToS and risks an account ban. `src/agents/linkedinAgent.ts` and the `linkedin-scraper-mcp` subprocess are gone. Do not bring them back.
+
+2. Contact discovery goes through `src/lib/contactFinder.ts`, which queries public search results via the Serper.dev API. No LinkedIn session, no scraping, no MCP subprocess, no Python.
 
 ## Commands
 
